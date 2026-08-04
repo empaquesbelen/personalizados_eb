@@ -1,0 +1,27 @@
+# ============================================================
+# Netlify — despliegue continuo del frontend (app/) desde el repo
+# ------------------------------------------------------------
+# La app vive en app/ (Vite + React). `base` hace que Netlify instale y
+# compile ahí; `publish` (relativo a base) es la carpeta de salida de Vite.
+# El redirect /* → /index.html es OBLIGATORIO para una SPA con React Router:
+# sin él, refrescar o entrar directo a /cotizador o /catalogo daría 404.
+#
+# Variables de entorno: NO son obligatorias (la config de Firebase tiene
+# valores por defecto en app/src/lib/firebase.js y son públicas). Se pueden
+# definir VITE_FIREBASE_* en Netlify para apuntar a otro proyecto. NINGÚN
+# secreto (token BCCR / service account) va acá: son solo del lado servidor.
+# ============================================================
+
+[build]
+  base = "app"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# SPA fallback: cualquier ruta desconocida sirve index.html (React Router).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
