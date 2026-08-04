@@ -120,6 +120,9 @@ export function normalizarProducto(datos = {}) {
     minimo: Math.max(1, Math.round(Number(datos.minimo) || 1)),
     precioSinIVA: Math.max(0, Number(datos.precioSinIVA) || 0),
     precioEnUsd: Boolean(datos.precioEnUsd),
+    // Condición asignada (id del doc en `condiciones`). '' = explícitamente
+    // "ninguna". Se guarda desde el módulo de Catálogo (superadmin).
+    condicionId: txt(datos.condicionId),
     activo: datos.activo !== false,
   };
 }
@@ -609,4 +612,69 @@ export function resolverSujetoCondicion(producto, material) {
   if (mNorm.includes('pet')) return 'Vasos Pet';
   if (mNorm.includes('carton')) return 'Vasos Carton';
   return nombre;
+}
+
+// ---------------------------------------------------------------------------
+// Gestión y resolución de CONDICIONES (asignadas por producto en el Catálogo).
+// El superadmin asigna a cada producto una condición (o ninguna) y puede crear
+// nuevas, que se guardan en la colección compartida `condiciones` para reutilizar.
+// ---------------------------------------------------------------------------
+
+/** Lista todas las condiciones (para el selector del catálogo), ordenadas. */
+export async function listarCondiciones() {
+  const cs = await cargarCondiciones();
+  return [...cs].sort((a, b) =>
+    String(a.articulo || '').localeCompare(String(b.articulo || ''), 'es', { numeric: true }),
+  );
+}
+
+/** Devuelve una condición por su id de documento ({id, articulo, texto}) o null. */
+export async function getCondicionPorId(id) {
+  if (!id) return null;
+  const cs = await cargarCondiciones();
+  return cs.find((c) => c.id === id) || null;
+}
+
+/**
+ * Crea una condición nueva en la colección compartida `condiciones` e invalida
+ * su caché. La autorización la imponen las Rules (write: admin/backoffice/
+ * superadmin). @returns {Promise<string>} id del doc creado.
+ */
+export async function crearCondicion({ articulo, texto }) {
+  const art = txt(articulo);
+  const tex = String(texto || '').trim();
+  if (!art) throw new Error('El nombre/artículo de la condición es obligatorio.');
+  if (!tex) throw new Error('El texto de la condición es obligatorio.');
+  const ref = await addDoc(collection(db, 'condiciones'), { articulo: art, texto: tex });
+  cacheCondiciones = null; // recargar en la próxima lectura (incluye la nueva)
+  promesaCondiciones = null;
+  return ref.id;
+}
+
+/**
+ * Resuelve la condición efectiva de un PRODUCTO, con esta precedencia:
+ *   1. `condicion` (snapshot ya guardado en la línea de la cotización) → se usa.
+ *   2. `condicionId` (asignado en el Catálogo) → esa condición de la colección.
+ *   3. `condicionId === ''` (explícitamente "ninguna") → null.
+ *   4. sin campo `condicionId` (producto legacy) → match heurístico por nombre.
+ * @returns {Promise<{articulo,texto}|null>}
+ */
+export async function resolverCondicionProducto(producto) {
+  if (!producto) return null;
+  // (1) snapshot en la cotización.
+  if (producto.condicion !== undefined) {
+    const snap = producto.condicion;
+    return snap && txt(snap.texto) ? { articulo: snap.articulo || '', texto: snap.texto } : null;
+  }
+  // (2) asignación explícita por id.
+  if (producto.condicionId) {
+    const c = await getCondicionPorId(producto.condicionId);
+    return c && txt(c.texto) ? { articulo: c.articulo || '', texto: c.texto } : null;
+  }
+  // (3) explícitamente ninguna.
+  if (producto.condicionId === '') return null;
+  // (4) legacy: heurística por nombre/material.
+  const sujeto = resolverSujetoCondicion(producto.producto, producto.material);
+  const texto = await getCondiciones(sujeto);
+  return txt(texto) ? { articulo: sujeto, texto } : null;
 }

@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Estado compartido con el mock (vi.hoisted: accesible dentro de la factory).
 const state = vi.hoisted(() => ({
-  dataset: [], // [{ id, ...campos }] que devuelve getDocs
+  dataset: [], // [{ id, ...campos }] que devuelve getDocs para `catalogo`
+  condicionesDataset: [], // idem para `condiciones`
   getDocsCount: 0,
   addDocCalls: [], // { col, payload }
   updateDocCalls: [], // { ref, payload }
@@ -23,10 +24,11 @@ vi.mock('firebase/firestore', () => ({
   collection: (_db, name) => ({ __collection: name }),
   doc: (_db, name, id) => ({ __doc: name, id }),
   getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
-  getDocs: vi.fn(async () => {
+  getDocs: vi.fn(async (col) => {
     state.getDocsCount += 1;
+    const ds = col?.__collection === 'condiciones' ? state.condicionesDataset : state.dataset;
     return {
-      docs: state.dataset.map((d) => {
+      docs: ds.map((d) => {
         const { id, ...rest } = d;
         return { id, data: () => rest };
       }),
@@ -53,11 +55,17 @@ import {
   cargarCatalogoAdmin,
   buscarItem,
   invalidarCache,
+  listarCondiciones,
+  getCondicionPorId,
+  crearCondicion,
+  resolverCondicionProducto,
 } from '../app/src/services/catalogo.js';
+import { recolectarCondiciones } from '../app/src/components/lineasCotizacion.js';
 import { calcularLinea, IVA_TASA } from '../app/src/services/calculo.js';
 
 beforeEach(() => {
   state.dataset = [];
+  state.condicionesDataset = [];
   state.getDocsCount = 0;
   state.addDocCalls = [];
   state.updateDocCalls = [];
@@ -89,6 +97,7 @@ describe('normalizarProducto — coerciones y trims', () => {
       minimo: 25,
       precioSinIVA: 1500.5,
       precioEnUsd: true,
+      condicionId: '', // sin condición en la entrada → ''
       activo: true,
     });
   });
@@ -219,6 +228,7 @@ describe('crearProducto — escribe payload normalizado e invalida caché', () =
       minimo: 10,
       precioSinIVA: 1200,
       precioEnUsd: false,
+      condicionId: '',
       activo: true,
     });
   });
@@ -394,5 +404,99 @@ describe('flujo de PRECIO de punta a punta (Regla Absoluta #10)', () => {
     const item = await buscarItem('Vasos', '10 oz', '', '', '');
     const calc = calcularLinea(item, 1, 500); // $3 * 500 = ₡1500 sin IVA
     expect(calc.precioBaseSinIVA).toBe(1500);
+  });
+});
+
+// ===========================================================================
+// CONDICIONES — asignación por producto + resolución para PDF/preview
+// ===========================================================================
+describe('normalizarProducto — condicionId', () => {
+  it('conserva el condicionId asignado (trim) y por defecto es ""', () => {
+    expect(normalizarProducto({ producto: 'X', tamano: 'Y', condicionId: '  abc123 ' }).condicionId).toBe('abc123');
+    expect(normalizarProducto({ producto: 'X', tamano: 'Y' }).condicionId).toBe('');
+  });
+});
+
+describe('condiciones · listar / getPorId / crear', () => {
+  it('listarCondiciones devuelve todas, ordenadas por artículo', async () => {
+    state.condicionesDataset = [
+      { id: 'c2', articulo: 'Vasos', texto: 'TV' },
+      { id: 'c1', articulo: 'Bolsa', texto: 'TB' },
+    ];
+    const cs = await listarCondiciones();
+    expect(cs.map((c) => c.articulo)).toEqual(['Bolsa', 'Vasos']);
+  });
+
+  it('getCondicionPorId resuelve por id o null', async () => {
+    state.condicionesDataset = [{ id: 'c1', articulo: 'Bolsa', texto: 'TB' }];
+    expect((await getCondicionPorId('c1')).texto).toBe('TB');
+    expect(await getCondicionPorId('noexiste')).toBe(null);
+    expect(await getCondicionPorId('')).toBe(null);
+  });
+
+  it('crearCondicion escribe {articulo,texto} en `condiciones` y devuelve id', async () => {
+    const id = await crearCondicion({ articulo: '  Vasos Cartón ', texto: '  Términos… ' });
+    expect(id).toBe('nuevo-id-123');
+    const call = state.addDocCalls.find((c) => c.col?.__collection === 'condiciones');
+    expect(call).toBeTruthy();
+    expect(call.payload).toEqual({ articulo: 'Vasos Cartón', texto: 'Términos…' });
+  });
+
+  it('crearCondicion exige artículo y texto', async () => {
+    await expect(crearCondicion({ articulo: '', texto: 'x' })).rejects.toThrow(/artículo/i);
+    await expect(crearCondicion({ articulo: 'X', texto: '   ' })).rejects.toThrow(/texto/i);
+  });
+});
+
+describe('resolverCondicionProducto — precedencia snapshot > condicionId > "" > heurística', () => {
+  it('(1) snapshot con texto → usa el snapshot', async () => {
+    const r = await resolverCondicionProducto({ condicion: { articulo: 'A', texto: 'TA' } });
+    expect(r).toEqual({ articulo: 'A', texto: 'TA' });
+  });
+  it('(1b) snapshot null (explícitamente ninguna) → null', async () => {
+    expect(await resolverCondicionProducto({ condicion: null })).toBe(null);
+  });
+  it('(1c) snapshot con texto vacío → null', async () => {
+    expect(await resolverCondicionProducto({ condicion: { articulo: 'A', texto: '' } })).toBe(null);
+  });
+  it('(2) condicionId → resuelve de la colección', async () => {
+    state.condicionesDataset = [{ id: 'c1', articulo: 'Vasos Cartón', texto: 'TVC' }];
+    expect(await resolverCondicionProducto({ condicionId: 'c1' })).toEqual({ articulo: 'Vasos Cartón', texto: 'TVC' });
+  });
+  it('(2b) condicionId inexistente → null', async () => {
+    state.condicionesDataset = [{ id: 'c1', articulo: 'Vasos', texto: 'T' }];
+    expect(await resolverCondicionProducto({ condicionId: 'zzz' })).toBe(null);
+  });
+  it('(3) condicionId "" (ninguna) → null (sin heurística)', async () => {
+    state.condicionesDataset = [{ id: 'c1', articulo: 'Bolsa', texto: 'T' }];
+    expect(await resolverCondicionProducto({ condicionId: '', producto: 'Bolsa' })).toBe(null);
+  });
+  it('(4) legacy sin campos → heurística por nombre', async () => {
+    state.condicionesDataset = [{ id: 'c1', articulo: 'Bolsa', texto: 'Cond bolsa' }];
+    expect(await resolverCondicionProducto({ producto: 'Bolsa', material: '' })).toEqual({
+      articulo: 'Bolsa',
+      texto: 'Cond bolsa',
+    });
+  });
+});
+
+describe('recolectarCondiciones — únicas por artículo+texto', () => {
+  it('dedup de snapshots e ignora las nulas/vacías', async () => {
+    const r = await recolectarCondiciones([
+      { condicion: { articulo: 'A', texto: 'TA' } },
+      { condicion: { articulo: 'A', texto: 'TA' } }, // duplicada
+      { condicion: { articulo: 'B', texto: 'TB' } },
+      { condicion: null }, // ninguna
+    ]);
+    expect(r).toEqual([
+      { articulo: 'A', texto: 'TA' },
+      { articulo: 'B', texto: 'TB' },
+    ]);
+  });
+
+  it('resuelve por condicionId cuando no hay snapshot', async () => {
+    state.condicionesDataset = [{ id: 'c1', articulo: 'Vasos', texto: 'TV' }];
+    const r = await recolectarCondiciones([{ condicionId: 'c1' }, { condicionId: '' }]);
+    expect(r).toEqual([{ articulo: 'Vasos', texto: 'TV' }]);
   });
 });

@@ -15,7 +15,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getConfig, cargarCatalogoBusqueda, productosDeCatalogo } from '../services/catalogo';
+import {
+  getConfig,
+  cargarCatalogoBusqueda,
+  productosDeCatalogo,
+  resolverCondicionProducto,
+} from '../services/catalogo';
 import {
   ajustarCantidad,
   calcularLinea,
@@ -64,6 +69,7 @@ export default function Cotizador() {
   const [generando, setGenerando] = useState(false);
   const [aviso, setAviso] = useState('');
   const [resultado, setResultado] = useState(null); // { consecutivo, pdfOk }
+  const [condicionesPreview, setCondicionesPreview] = useState([]); // [{articulo,texto}]
 
   // Tipo de cambio: SOLO lectura, desde config (BCCR o manual).
   const tipoCambio = Number(config?.tipoCambio) || 0;
@@ -107,6 +113,20 @@ export default function Cotizador() {
   const totales = useMemo(() => calcularTotales(productosValidos, tipoCambio), [productosValidos, tipoCambio]);
 
   const clavesAgregadas = useMemo(() => new Set(lineas.map((l) => l.clave)), [lineas]);
+
+  // Condiciones heredadas de los productos: se resuelven en vivo al cambiar las
+  // líneas para MOSTRARLAS antes de generar (y son las mismas que van al PDF).
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const items = lineasCalc.filter((l) => l.calc).map((l) => l.item);
+      const conds = await recolectarCondiciones(items);
+      if (vivo) setCondicionesPreview(conds);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [lineasCalc]);
 
   // ---- Handlers del buscador/tabla ----
   const agregarItems = useCallback((items) => {
@@ -173,6 +193,17 @@ export default function Cotizador() {
     try {
       const clienteDatos = { nombre: cliente.nombre.trim(), contacto: cliente.contacto.trim() };
 
+      // Snapshot de la condición de cada línea (heredada del producto del
+      // catálogo). Queda guardada EN la cotización para el PDF y la trazabilidad,
+      // aunque después se edite la condición compartida.
+      const lineasValidas = lineasCalc.filter((l) => l.calc);
+      const productos = await Promise.all(
+        lineasValidas.map(async (l) => ({
+          ...construirProductoCotizacion(l.item, l.calc),
+          condicion: await resolverCondicionProducto(l.item),
+        })),
+      );
+
       // 1) Crear y guardar en Firestore (estado GENERADA). La creación y la
       //    RESERVA ATÓMICA del consecutivo van en la misma transacción (Regla #2
       //    + número sin colisiones). El consecutivo definitivo lo devuelve el
@@ -180,7 +211,7 @@ export default function Cotizador() {
       const { consecutivo } = await crearCotizacion({
         prevendedor: perfil,
         cliente: clienteDatos,
-        productos: productosValidos,
+        productos,
         totales,
         tipoCambio,
       });
@@ -188,7 +219,7 @@ export default function Cotizador() {
       // 2) Generar el PDF. Si esto falla, la cotización ya quedó guardada.
       let pdfOk = true;
       try {
-        const condiciones = await recolectarCondiciones(productosValidos);
+        const condiciones = await recolectarCondiciones(productos);
         await generarPDFCotizacion({
           consecutivo,
           config,
@@ -198,7 +229,7 @@ export default function Cotizador() {
             email: perfil.email || '',
           },
           cliente: clienteDatos,
-          productos: productosValidos,
+          productos,
           totales,
           tipoCambio,
           condiciones,
@@ -340,6 +371,25 @@ export default function Cotizador() {
               onQuitar={quitarLinea}
             />
           </section>
+
+          {/* Condiciones (heredadas de los productos) — se muestran ANTES de
+              generar y son exactamente las que irán al PDF. */}
+          {condicionesPreview.length > 0 && (
+            <section className="panel" aria-label="Condiciones de la cotización">
+              <h2 className="seccion-titulo">Condiciones</h2>
+              <p className="campo-ayuda">
+                Heredadas de los productos. Se incluirán en el PDF de la cotización.
+              </p>
+              <ul className="cond-lista">
+                {condicionesPreview.map((c, i) => (
+                  <li key={`${c.articulo}-${i}`} className="cond-item">
+                    {c.articulo && <strong className="cond-item-art">{c.articulo}</strong>}
+                    <p className="cond-item-txt">{c.texto}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {/* Totales + generar */}
           <section className="panel totales-panel" aria-label="Totales de la cotización">

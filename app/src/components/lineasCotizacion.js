@@ -8,12 +8,7 @@
 // sincrónica en el componente con `calcularLinea` (no hay derivación asíncrona).
 // Se apoya en services/catalogo.js y services/calculo.js.
 // ============================================
-import {
-  buscarItem,
-  claveItem,
-  getCondiciones,
-  resolverSujetoCondicion,
-} from '../services/catalogo';
+import { buscarItem, claveItem, resolverCondicionProducto } from '../services/catalogo';
 import { ajustarCantidad } from '../services/calculo';
 
 let contadorLineas = 0;
@@ -82,18 +77,33 @@ export async function reconstruirLineas(productos) {
   return lineas;
 }
 
-/** Recolecta las condiciones (una por "sujeto" único) para el PDF. */
+/**
+ * Recolecta las condiciones ÚNICAS (por artículo+texto) para el PDF y para la
+ * vista previa antes de generar. Acepta tanto productos de una cotización (con
+ * el snapshot `condicion`) como items del catálogo (con `condicionId`); la
+ * resolución/precedencia la hace resolverCondicionProducto.
+ * @returns {Promise<Array<{articulo,texto}>>}
+ */
 export async function recolectarCondiciones(productos) {
-  const sujetos = [];
-  (productos || []).forEach((p) => {
-    const sujeto = resolverSujetoCondicion(p.producto, p.material);
-    if (sujeto && !sujetos.includes(sujeto)) sujetos.push(sujeto);
-  });
-  const entradas = await Promise.all(
-    sujetos.map(async (articulo) => {
-      const texto = await getCondiciones(articulo);
-      return { articulo, texto };
-    }),
-  );
-  return entradas.filter((e) => String(e.texto || '').trim().length > 0);
+  const lista = Array.isArray(productos) ? productos : [];
+  const vistos = new Set();
+  const salida = [];
+  for (const p of lista) {
+    // eslint-disable-next-line no-await-in-loop -- condiciones cacheadas (rápido)
+    const cond = await resolverCondicionProducto(p);
+    if (!cond || !String(cond.texto || '').trim()) continue;
+    const clave = `${String(cond.articulo || '').trim().toLowerCase()}|${String(cond.texto).trim().toLowerCase()}`;
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    salida.push({ articulo: cond.articulo, texto: cond.texto });
+  }
+  return salida;
+}
+
+/**
+ * Snapshot de la condición de UN item del catálogo para guardar en la línea de
+ * la cotización (trazabilidad). Devuelve {articulo,texto} o null.
+ */
+export async function snapshotCondicion(item) {
+  return resolverCondicionProducto(item);
 }

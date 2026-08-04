@@ -143,6 +143,19 @@ export default function DetalleCotizacion() {
   const [aviso, setAviso] = useState(null);
   const [generandoPdf, setGenerandoPdf] = useState(false);
 
+  // ---- Condiciones (snapshot/heredadas de los productos) para mostrarlas ----
+  const [condiciones, setCondiciones] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const conds = await recolectarCondiciones(cot?.productos || []);
+      if (vivo) setCondiciones(conds);
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [cot?.productos]);
+
   // ---- Estado de edición (modelo buscador + carrito, igual que el Cotizador) ----
   const [editando, setEditando] = useState(false);
   const [prepEdicion, setPrepEdicion] = useState(false);
@@ -519,6 +532,21 @@ export default function DetalleCotizacion() {
               </div>
             </dl>
           </section>
+
+          {/* Condiciones (heredadas de los productos; van en el PDF) */}
+          {condiciones.length > 0 && (
+            <section className="panel" aria-label="Condiciones">
+              <h2 className="seccion-titulo">Condiciones</h2>
+              <ul className="cond-lista">
+                {condiciones.map((c, i) => (
+                  <li key={`${c.articulo}-${i}`} className="cond-item">
+                    {c.articulo && <strong className="cond-item-art">{c.articulo}</strong>}
+                    <p className="cond-item-txt">{c.texto}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {/* Datos de pago (gestionado por backoffice; visible para todos) */}
           <SeccionPago

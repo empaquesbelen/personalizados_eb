@@ -452,6 +452,34 @@ svg { flex-shrink: 0; }
 .badge-usd { font-size: 11px; font-weight: 650; color: var(--indigo-600); }
 .fila-inactiva { opacity: 0.55; }
 
+/* Campo de condición del producto (form del catálogo) */
+.producto-grid .campo-condicion { grid-column: 1 / -1; }
+.cond-preview {
+  margin: -2px 0 0;
+  padding: 8px 10px;
+  background: var(--gris-100);
+  border-radius: var(--radio-sm);
+  font-size: 12.5px;
+  color: var(--texto-suave);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.cond-nueva {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  padding: var(--e-3);
+  border: 1px dashed var(--borde-fuerte);
+  border-radius: var(--radio-sm);
+}
+
+/* Lista de condiciones (preview en cotizador + detalle) */
+.cond-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-3); }
+.cond-item { padding: 10px 12px; background: var(--gris-100); border-radius: var(--radio-sm); }
+.cond-item-art { display: block; font-size: 13px; color: var(--indigo-700); margin-bottom: 3px; }
+.cond-item-txt { margin: 0; font-size: 13px; color: var(--texto-suave); white-space: pre-wrap; line-height: 1.4; }
+
 .alerta-ok {
   display: flex;
   align-items: center;

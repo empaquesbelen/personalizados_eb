@@ -15,8 +15,13 @@ import {
   setProductoActivo,
   valoresDistintos,
   validarProducto,
+  listarCondiciones,
+  crearCondicion,
 } from '../services/catalogo';
 import CampoCombo from '../components/CampoCombo';
+
+// Valor centinela para la opción "crear una condición nueva" en el selector.
+const COND_NUEVA = '__nueva__';
 
 // Campos de texto (combinación) con su ayuda para el superadmin.
 const CAMPOS_TEXTO = [
@@ -31,7 +36,7 @@ const CAMPOS_TEXTO = [
 function productoVacio() {
   return {
     cod: '', producto: '', tamano: '', impresion1: '', impresion2: '', material: '',
-    minimo: 1, precioSinIVA: 0, precioEnUsd: false, activo: true,
+    minimo: 1, precioSinIVA: 0, precioEnUsd: false, condicionId: '', activo: true,
   };
 }
 
@@ -63,6 +68,7 @@ const alertaError = (mensaje) => (
 
 export default function Catalogo() {
   const [items, setItems] = useState([]);
+  const [condiciones, setCondiciones] = useState([]); // [{id, articulo, texto}]
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
@@ -75,7 +81,7 @@ export default function Catalogo() {
     setCargando(true);
     setError('');
     try {
-      const data = await cargarCatalogoAdmin();
+      const [data, conds] = await Promise.all([cargarCatalogoAdmin(), listarCondiciones()]);
       // Orden estable por producto, luego tamaño.
       data.sort(
         (a, b) =>
@@ -83,6 +89,7 @@ export default function Catalogo() {
           String(a.tamano || '').localeCompare(String(b.tamano || ''), 'es', { numeric: true }),
       );
       setItems(data);
+      setCondiciones(conds);
     } catch (e) {
       console.error('Error cargando el catálogo:', e);
       setError('No se pudo cargar el catálogo: ' + (e.message || e));
@@ -94,6 +101,20 @@ export default function Catalogo() {
   useEffect(() => {
     recargar();
   }, []);
+
+  // Mapa id → artículo de condición, para mostrar la condición en la lista.
+  const condPorId = useMemo(() => {
+    const m = new Map();
+    condiciones.forEach((c) => m.set(c.id, c.articulo || '(sin nombre)'));
+    return m;
+  }, [condiciones]);
+
+  // Etiqueta de la condición de un producto para la columna de la lista.
+  function etiquetaCondicion(it) {
+    if (it.condicionId) return condPorId.get(it.condicionId) || '(condición eliminada)';
+    if (it.condicionId === '') return 'Ninguna';
+    return 'Auto (por nombre)'; // legacy sin campo → heurística
+  }
 
   // Opciones (valores existentes) por campo, para los combobox del formulario.
   const opcionesPorCampo = useMemo(() => {
@@ -214,6 +235,7 @@ export default function Catalogo() {
                 <th>Tamaño</th>
                 <th>Impresión</th>
                 <th>Material</th>
+                <th>Condición</th>
                 <th className="col-num">Mínimo</th>
                 <th className="col-num">Precio s/IVA</th>
                 <th>Estado</th>
@@ -228,6 +250,7 @@ export default function Catalogo() {
                   <td data-label="Tamaño">{it.tamano || '—'}</td>
                   <td data-label="Impresión">{fmtImpresiones(it)}</td>
                   <td data-label="Material">{it.material || '—'}</td>
+                  <td data-label="Condición" className="texto-suave">{etiquetaCondicion(it)}</td>
                   <td data-label="Mínimo" className="col-num">{Number(it.minimo || 0).toLocaleString('es-CR')}</td>
                   <td data-label="Precio s/IVA" className="col-num">
                     {fmtPrecio(it)}
@@ -257,6 +280,7 @@ export default function Catalogo() {
         <ModalProducto
           inicial={editando}
           opcionesPorCampo={opcionesPorCampo}
+          condiciones={condiciones}
           onCerrar={() => setEditando(null)}
           onGuardado={onGuardado}
         />
@@ -268,13 +292,17 @@ export default function Catalogo() {
 // ---------------------------------------------------------------------------
 // Modal para agregar / editar un producto (combobox por campo + validación).
 // ---------------------------------------------------------------------------
-function ModalProducto({ inicial, opcionesPorCampo, onCerrar, onGuardado }) {
+function ModalProducto({ inicial, opcionesPorCampo, condiciones, onCerrar, onGuardado }) {
   const esNuevo = !inicial.id;
   const [form, setForm] = useState({ ...productoVacio(), ...inicial });
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
 
   const set = (parche) => setForm((f) => ({ ...f, ...parche }));
+
+  const creandoCond = form.condicionId === COND_NUEVA;
+  const condSeleccionada =
+    form.condicionId && !creandoCond ? (condiciones || []).find((c) => c.id === form.condicionId) : null;
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -286,11 +314,25 @@ function ModalProducto({ inicial, opcionesPorCampo, onCerrar, onGuardado }) {
     setError('');
     setGuardando(true);
     try {
+      // Si eligió "crear nueva", primero se guarda la condición en la colección
+      // compartida y se usa su id para el producto.
+      let condicionId = form.condicionId;
+      if (creandoCond) {
+        const art = String(form.nuevaArticulo || '').trim();
+        const tex = String(form.nuevaTexto || '').trim();
+        if (!art || !tex) {
+          setError('Completá el nombre y el texto de la condición nueva.');
+          setGuardando(false);
+          return;
+        }
+        condicionId = await crearCondicion({ articulo: art, texto: tex });
+      }
+      const payload = { ...form, condicionId };
       if (esNuevo) {
-        await crearProducto(form);
+        await crearProducto(payload);
         onGuardado(`Producto «${form.producto.trim()}» creado.`);
       } else {
-        await actualizarProducto(inicial.id, form);
+        await actualizarProducto(inicial.id, payload);
         onGuardado(`Producto «${form.producto.trim()}» actualizado.`);
       }
     } catch (err) {
@@ -378,6 +420,52 @@ function ModalProducto({ inicial, opcionesPorCampo, onCerrar, onGuardado }) {
               />
               <span>Activo (visible en el cotizador)</span>
             </label>
+          )}
+
+          {/* Condición asignada al producto (span completo) */}
+          <label className="campo campo-condicion">
+            <span>Condición del producto</span>
+            <select value={form.condicionId ?? ''} onChange={(e) => set({ condicionId: e.target.value })}>
+              <option value="">— Ninguna —</option>
+              {(condiciones || []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.articulo}
+                </option>
+              ))}
+              <option value={COND_NUEVA}>+ Crear una condición nueva…</option>
+            </select>
+            <span className="campo-ayuda">
+              Se muestra antes de generar la cotización y en el PDF. La línea la hereda automáticamente.
+            </span>
+          </label>
+
+          {condSeleccionada && <p className="campo-condicion cond-preview">{condSeleccionada.texto}</p>}
+
+          {creandoCond && (
+            <div className="campo-condicion cond-nueva">
+              <label className="campo">
+                <span>Nombre/artículo de la condición nueva *</span>
+                <input
+                  type="text"
+                  value={form.nuevaArticulo || ''}
+                  onChange={(e) => set({ nuevaArticulo: e.target.value })}
+                  placeholder="Ej: Vasos Cartón"
+                  autoComplete="off"
+                />
+              </label>
+              <label className="campo">
+                <span>Texto de la condición *</span>
+                <textarea
+                  rows={4}
+                  value={form.nuevaTexto || ''}
+                  onChange={(e) => set({ nuevaTexto: e.target.value })}
+                  placeholder="Términos y condiciones que verá el cliente para este producto…"
+                />
+              </label>
+              <span className="campo-ayuda">
+                Se guardará en el catálogo de condiciones para reutilizarla en otros productos.
+              </span>
+            </div>
           )}
         </div>
 
