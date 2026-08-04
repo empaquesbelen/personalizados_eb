@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cotizador EB</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-nav">Saltar al contenido principal</a>
+  <div id="alert-container" role="status" aria-live="polite" aria-atomic="true" style="position: fixed; top: 20px; right: 20px; z-index: 999; max-width: 400px;"></div>
+
+  <!-- NAVBAR -->
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <img src="./logo/logo.webp" alt="Logo Personalizados EB" class="navbar-logo">
+      <h1>Cotizador Personalizados EB</h1>
+    </div>
+
+    <div class="navbar-info">
+      <span class="vendor-field vendor-required-active">
+        <label for="vendor-select">Vendedor <abbr title="Requerido">*</abbr></label>
+        <select id="vendor-select" style="padding: 8px; border-radius: 4px; border: 1px solid #ddd; font-size: 14px; min-width: 200px;">
+          <option value="">-- Selecciona vendedor --</option>
+        </select>
+      </span>
+      <span>
+        <label>Tipo de Cambio:</label>
+        <span class="exchange-rate-display">₡512 / $1</span>
+        <input type="hidden" id="exchange-rate" value="512">
+      </span>
+    </div>
+  </nav>
+
+  <!-- CONTENIDO PRINCIPAL -->
+  <div class="main-content" id="main-content" role="main">
+    <div class="quick-steps" aria-label="Pasos rápidos para cotizar">
+      <h2>Pasos rápidos</h2>
+      <div class="quick-steps-grid">
+        <div class="quick-step-item" id="quick-step-1"><span>1</span> Selecciona vendedor y cliente</div>
+        <div class="quick-step-item" id="quick-step-2"><span>2</span> Filtra y agrega combinaciones</div>
+        <div class="quick-step-item" id="quick-step-3"><span>3</span> Revisa el resumen y totales</div>
+        <div class="quick-step-item" id="quick-step-4"><span>4</span> Genera la cotización en PDF</div>
+      </div>
+    </div>
+
+    <!-- SECCIÓN 1: INFORMACIÓN DEL CLIENTE -->
+    <div class="section">
+      <h2>Cliente</h2>
+      <p class="section-subhint">Completa solo el nombre. El contacto es opcional.</p>
+        <p class="required-legend"><abbr title="Campo requerido">*</abbr> Campo requerido</p>
+      <div class="section-row">
+        <div>
+            <label for="client-name">Nombre / Empresa <abbr title="Requerido">*</abbr></label>
+            <input type="text" id="client-name" placeholder="Ej: Casa Manigua S.A." autocomplete="organization" required>
+          <div class="error-text" id="client-name-error"></div>
+        </div>
+        <div>
+          <label for="client-contact">Contacto / Atención</label>
+            <input type="text" id="client-contact" placeholder="Ej: Juan Pérez" autocomplete="name">
+            <div class="error-text" id="client-contact-error"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECCIÓN 2: PRODUCTOS -->
+    <div class="section">
+      <h2>Productos</h2>
+      <p class="section-subhint">Usa el buscador para agregar líneas listas. Las líneas agregadas quedan bloqueadas para evitar errores.</p>
+
+      <div style="overflow-x: auto;">
+        <table class="products-table" id="products-table" aria-label="Tabla de productos">
+          <thead>
+            <tr>
+              <th style="width:30px;">#</th>
+              <th style="width:180px;">Producto</th>
+              <th style="width:100px;">Tamaño</th>
+              <th style="width:100px;">Cantidad U</th>
+              <th style="width:140px;">Impresión 1</th>
+              <th style="width:140px;">Impresión 2</th>
+              <th style="width:120px;">Material</th>
+              <th style="width:120px;">Total</th>
+              <th style="width:60px;">Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="products-empty-state">
+              <td colspan="9" class="table-empty-state">Selecciona líneas en el buscador y presiona "Agregar Seleccionados"</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="product-search-layout" id="product-search-layout">
+        <div class="product-search-panel">
+          <h3>Buscar Combinaciones</h3>
+          <div class="product-search-controls">
+            <input
+              type="text"
+              id="product-search-input"
+              placeholder="Buscar por producto, tamaño, impresión o material"
+              aria-label="Buscar combinaciones de producto"
+              autocomplete="off"
+            >
+            <div class="product-search-filters">
+              <input
+                type="text"
+                id="search-filter-cod"
+                placeholder="Código (ej: 1254)"
+                aria-label="Filtrar por código"
+                autocomplete="off"
+              >
+              <select id="search-filter-producto" aria-label="Filtrar por producto">
+                <option value="">Todos los productos</option>
+              </select>
+              <select id="search-filter-tamano" aria-label="Filtrar por tamaño">
+                <option value="">Todos los tamaños</option>
+              </select>
+              <select id="search-filter-material" aria-label="Filtrar por material">
+                <option value="">Todos los materiales</option>
+              </select>
+            </div>
+          </div>
+          <div id="product-search-results" class="search-results-box" aria-live="polite"></div>
+        </div>
+
+        <aside class="search-cart-panel" aria-label="Carrito de selecciones">
+          <h3>Mini Carrito</h3>
+          <p class="field-hint">Selecciona filas en los resultados para agregarlas en lote.</p>
+          <div id="selected-items-count" class="selected-items-count">0 seleccionados</div>
+          <div id="selected-items-list" class="selected-items-list">
+            <p class="table-empty-state">No hay líneas seleccionadas</p>
+          </div>
+          <div class="search-cart-actions">
+            <button class="btn btn-secondary" id="clear-selected-items-btn" type="button">Limpiar</button>
+            <button class="btn btn-primary" id="add-selected-products-btn" type="button">Agregar Seleccionados</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- SECCIÓN 3: RESUMEN -->
+    <div class="section section-collapsible" id="quotation-summary-section">
+      <div class="section-header-with-toggle">
+        <h2>Resumen de Cotización</h2>
+        <button
+          type="button"
+          class="section-toggle-btn"
+          id="toggle-summary-btn"
+          aria-expanded="false"
+          aria-controls="summary-content"
+          aria-label="Expandir o minimizar resumen de cotización"
+        >
+          <span class="toggle-icon" aria-hidden="true">▸</span>
+          <span class="toggle-text">Expandir</span>
+        </button>
+      </div>
+      <p class="section-subhint">Esta sección inicia minimizada para reducir ruido visual.</p>
+
+      <div id="summary-content" class="collapsible-content" hidden>
+      <div style="overflow-x: auto;">
+        <table class="summary-table" id="summary-table" aria-label="Resumen de cotización">
+          <thead>
+            <tr>
+              <th style="text-align: left;">Producto</th>
+                <th title="Cantidad mínima requerida">Cant. Mín.</th>
+              <th>Cantidad</th>
+                <th title="Precio sin Impuesto al Valor Agregado">Precio sin IVA</th>
+                <th title="Impuesto al Valor Agregado 13%">IVA (13%)</th>
+                <th title="Total incluyendo IVA del 13%">Total con IVA</th>
+                <th title="Precio unitario por pieza">P. Unitario</th>
+            </tr>
+          </thead>
+          <tbody id="summary-tbody">
+            <tr>
+              <td colspan="7" style="text-align: center; color: #999;">Agrega productos para ver el resumen</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="totals-box">
+        <div class="total-item">
+          <label>Subtotal (sin IVA)</label>
+          <div class="amount" id="subtotal-amount">₡0.00</div>
+        </div>
+        <div class="total-item">
+          <label>IVA (13%)</label>
+          <div class="amount" id="tax-amount">₡0.00</div>
+        </div>
+        <div class="total-item">
+          <label>TOTAL (con IVA)</label>
+          <div class="amount" id="total-amount">₡0.00</div>
+        </div>
+        <div class="total-item">
+          <label>Total en USD</label>
+           <div class="amount" id="total-usd-amount" aria-label="Total en dólares">$0.00</div>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <!-- SECCIÓN 4: CONDICIONES -->
+    <div class="section" id="conditions-section" style="display: none;">
+      <h2>Términos y Condiciones</h2>
+      <div class="conditions-box" id="conditions-box"></div>
+    </div>
+
+    <!-- SECCIÓN 5: HISTORIAL -->
+    <div class="section">
+      <h2>Últimas Cotizaciones</h2>
+      <div id="history-container">
+        <p style="color: #999;">Sin cotizaciones aún</p>
+      </div>
+    </div>
+
+    <!-- BOTÓN GENERAR COTIZACIÓN -->
+    <div style="text-align: center; margin: 20px 0;">
+      <button class="btn btn-primary btn-generate" id="generate-quotation-btn" aria-label="Generar cotización en formato PDF">
+        Generar Cotización
+      </button>
+      
+    </div>
+  </div>
+
+  <!-- MODAL DE CONFIRMACIÓN -->
+  <div class="modal" id="confirm-modal">
+    <div class="modal-content">
+      <!-- Se llena dinámicamente -->
+    </div>
+  </div>
+
+  <!-- TEMPLATES (invisibles, para clonar) -->
+  <template id="product-row-template" style="display: none;">
+    <tr class="product-row">
+      <td class="row-number">1</td>
+      <td>
+        <select class="producto-select" aria-label="Producto" required></select>
+      </td>
+      <td>
+          <select class="tamano-select" aria-label="Tamaño" required></select>
+      </td>
+      <td>
+          <input type="number" class="cantidad-input" min="1" value="1" inputmode="numeric" aria-label="Cantidad" required>
+      </td>
+      <td>
+          <select class="impresion1-select" aria-label="Impresión 1" required></select>
+      </td>
+      <td>
+          <select class="impresion2-select" aria-label="Impresión 2" required></select>
+      </td>
+      <td>
+          <select class="material-select" aria-label="Material" required></select>
+      </td>
+      <td class="price-cell" style="text-align: right; font-weight: bold;">₡0.00</td>
+      <td style="text-align: center;">
+          <button type="button" class="btn btn-delete delete-btn" aria-label="Eliminar esta fila">&times;</button>
+      </td>
+    </tr>
+  </template>
+
+  <!-- LIBRERÍAS EXTERNAS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.37/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- APPLICATION SCRIPTS (módulos ES6) -->
+  <script type="module" src="./js/bootstrap.js?v=20260430a"></script>
+</body>
+</html>

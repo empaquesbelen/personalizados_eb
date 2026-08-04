@@ -1,0 +1,17 @@
+{
+  "files.watcherExclude": {
+    "**/_tmp_indicadores_bccr/**": true,
+    "**/venv/**": true
+  },
+  "search.exclude": {
+    "**/_tmp_indicadores_bccr/**": true,
+    "**/venv/**": true
+  },
+  "git.autoRepositoryDetection": "openEditors",
+  "git.autofetch": false,
+  "liveServer.settings.ignoreFiles": [
+    "**/_tmp_indicadores_bccr/**",
+    "**/venv/**",
+    "**/.git/**"
+  ]
+}

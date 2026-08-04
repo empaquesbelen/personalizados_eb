@@ -1,0 +1,204 @@
+rules_version = '2';
+
+// ============================================================
+// Firestore Security Rules — Sistema de Control Interno EB
+// ------------------------------------------------------------
+// Fuente de verdad de permisos (CLAUDE.md · Regla Absoluta #3).
+// La matriz de transiciones es ESPEJO de app/src/constants/dominio.js
+// y de docs/ARQUITECTURA.md. Si cambia una, cambian las tres.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------- Helpers globales ----------------
+    function signedIn() {
+      return request.auth != null;
+    }
+    function userPath() {
+      return /databases/$(database)/documents/usuarios/$(request.auth.uid);
+    }
+    function userExists() {
+      return signedIn() && exists(userPath());
+    }
+    function userDoc() {
+      return get(userPath()).data;
+    }
+    function activo() {
+      return userExists() && userDoc().activo == true;
+    }
+    function rol() {
+      return userExists() ? userDoc().rol : '';
+    }
+    // Activo Y con alguno de los roles indicados
+    function hasRole(roles) {
+      return activo() && (rol() in roles);
+    }
+
+    // ---------------- usuarios ----------------
+    match /usuarios/{uid} {
+      // Cada quien lee su propio doc (lo necesita la app al iniciar sesión);
+      // el superadmin lee todos.
+      allow read: if signedIn() && (request.auth.uid == uid || hasRole(['superadmin']));
+      // Solo el superadmin da de alta / edita / desactiva usuarios y roles.
+      allow create, update, delete: if hasRole(['superadmin']);
+    }
+
+    // ---------------- catálogo / config / condiciones ----------------
+    match /catalogo/{id} {
+      allow read: if activo();
+      allow write: if hasRole(['admin', 'backoffice', 'superadmin']);
+    }
+    match /config/{id} {
+      allow read: if activo();
+      allow write: if hasRole(['admin', 'superadmin']);
+    }
+    match /condiciones/{id} {
+      allow read: if activo();
+      allow write: if hasRole(['admin', 'backoffice', 'superadmin']);
+    }
+
+    // ---------------- contadores (consecutivo atómico) ----------------
+    // Un doc por vendedor+día (clave = PREFIJO "STE2307"), con { valor:int }.
+    // Se reserva DENTRO de la misma runTransaction que crea la cotización
+    // (services/cotizaciones.crearCotizacion). Reglas del contador:
+    //   - lo leen los usuarios activos (la transacción necesita leerlo),
+    //   - SOLO quien puede crear cotizaciones (prevendedor/superadmin) lo toca,
+    //   - el valor SOLO puede SUBIR de a 1 (nunca baja, nunca salta, nunca se
+    //     fija arbitrariamente) → estrictamente creciente y sin colisiones,
+    //   - primer consecutivo del día para ese prefijo: arranca exactamente en 1,
+    //   - nunca se borra (no perder la secuencia / trazabilidad).
+    match /contadores/{clave} {
+      allow read: if activo();
+      allow create: if hasRole(['prevendedor', 'superadmin'])
+        && request.resource.data.valor == 1;
+      allow update: if hasRole(['prevendedor', 'superadmin'])
+        && request.resource.data.valor is int
+        && request.resource.data.valor == resource.data.valor + 1;
+      allow delete: if false;
+    }
+
+    // ---------------- cotizaciones ----------------
+    match /cotizaciones/{cotId} {
+
+      function antes() { return resource.data; }
+      function despues() { return request.resource.data; }
+      function cambiaEstado() { return antes().estado != despues().estado; }
+
+      // Edición de contenido (NO cambia estado): solo backoffice/superadmin.
+      // NOTA: se usa `rol() in [...]` (no `hasRole`) porque `activo()` ya está
+      // garantizado por el `allow update` que la invoca. Evita re-inlinar
+      // `activo()` y mantiene el árbol de expresiones por debajo del límite
+      // de evaluación de Rules.
+      function edicionContenido() {
+        return !cambiaEstado() && (rol() in ['backoffice', 'superadmin']);
+      }
+
+      // ¿La transición exige nota? Espejo del `requiereNota` de dominio.js /
+      // matriz de ARQUITECTURA.md §3:
+      //   admin  PENDIENTE_ADMIN -> PENDIENTE_DISENO        (aprueba)
+      //   admin  PENDIENTE_ADMIN -> EN_REVISION_BACKOFFICE  (devuelve)
+      //   backoffice REVISION_FINAL_BACKOFFICE -> EN_DISENO (rechaza)
+      function transicionRequiereNota() {
+        return (antes().estado == 'PENDIENTE_ADMIN' && despues().estado == 'PENDIENTE_DISENO') ||
+               (antes().estado == 'PENDIENTE_ADMIN' && despues().estado == 'EN_REVISION_BACKOFFICE') ||
+               (antes().estado == 'REVISION_FINAL_BACKOFFICE' && despues().estado == 'EN_DISENO');
+      }
+
+      // ---- Espejo del evento en el propio doc (Regla Absoluta #2) ----
+      // Firestore no puede exigir la escritura CRUZADA de la subcolección
+      // historial_estados desde la regla del doc padre; por eso toda escritura
+      // que cambie `estado` (y el create) debe traer un mapa `ultimoEvento`
+      // coherente. Las reglas lo validan aquí; el servicio además sigue
+      // escribiendo el evento en historial_estados (mismo writeBatch).
+
+      // Espejo para una transición (update): estadoAnterior = estado previo.
+      function eventoEspejoUpdate() {
+        return 'ultimoEvento' in despues()
+          && despues().ultimoEvento is map
+          && despues().ultimoEvento.estadoAnterior == antes().estado
+          && despues().ultimoEvento.estadoNuevo == despues().estado
+          && despues().ultimoEvento.usuarioId == request.auth.uid
+          && despues().ultimoEvento.rol == rol()
+          && despues().ultimoEvento.nota is string
+          && (!transicionRequiereNota() || despues().ultimoEvento.nota != '')
+          && despues().ultimoEvento.timestamp == request.time;
+      }
+
+      // Espejo para el create: estadoAnterior = null; GENERADA no exige nota.
+      function eventoEspejoCreate() {
+        return 'ultimoEvento' in despues()
+          && despues().ultimoEvento is map
+          && despues().ultimoEvento.estadoAnterior == null
+          && despues().ultimoEvento.estadoNuevo == despues().estado
+          && despues().ultimoEvento.usuarioId == request.auth.uid
+          && despues().ultimoEvento.rol == rol()
+          && despues().ultimoEvento.nota is string
+          && despues().ultimoEvento.timestamp == request.time;
+      }
+
+      // Transición de estado válida según la matriz de ARQUITECTURA.md.
+      // Se usa `rol() in [...]` (no `hasRole`): `activo()` ya está garantizado
+      // por el `allow update` que la invoca, así se evita re-inlinar `activo()`
+      // nueve veces (mantiene el árbol por debajo del límite de evaluación).
+      function transicionValida() {
+        return cambiaEstado() && (
+          (antes().estado == 'GENERADA' && despues().estado == 'EN_REVISION_BACKOFFICE' && (rol() in ['backoffice', 'superadmin'])) ||
+          (antes().estado == 'GENERADA' && despues().estado == 'ANULADA' && (rol() in ['backoffice', 'superadmin'])) ||
+          (antes().estado == 'EN_REVISION_BACKOFFICE' && despues().estado == 'PENDIENTE_ADMIN' && (rol() in ['backoffice', 'superadmin'])) ||
+          (antes().estado == 'PENDIENTE_ADMIN' && despues().estado == 'PENDIENTE_DISENO' && (rol() in ['admin', 'superadmin'])) ||
+          (antes().estado == 'PENDIENTE_ADMIN' && despues().estado == 'EN_REVISION_BACKOFFICE' && (rol() in ['admin', 'superadmin'])) ||
+          (antes().estado == 'PENDIENTE_DISENO' && despues().estado == 'EN_DISENO' && (rol() in ['disenador', 'superadmin'])) ||
+          (antes().estado == 'EN_DISENO' && despues().estado == 'REVISION_FINAL_BACKOFFICE' && (rol() in ['disenador', 'superadmin'])) ||
+          (antes().estado == 'REVISION_FINAL_BACKOFFICE' && despues().estado == 'COMPLETADA' && (rol() in ['backoffice', 'superadmin'])) ||
+          (antes().estado == 'REVISION_FINAL_BACKOFFICE' && despues().estado == 'EN_DISENO' && (rol() in ['backoffice', 'superadmin']))
+        );
+      }
+
+      // Lectura por visibilidad de rol.
+      allow read: if activo() && (
+        hasRole(['backoffice', 'admin', 'superadmin']) ||
+        (rol() == 'prevendedor' && resource.data.prevendedorId == request.auth.uid) ||
+        (rol() == 'disenador' && resource.data.estado in ['PENDIENTE_DISENO', 'EN_DISENO', 'REVISION_FINAL_BACKOFFICE', 'COMPLETADA'])
+      );
+
+      // Crear: prevendedor crea SU propia cotización, siempre en estado GENERADA,
+      // con su evento espejo `ultimoEvento` (estadoAnterior=null) coherente.
+      allow create: if hasRole(['prevendedor', 'superadmin'])
+        && despues().prevendedorId == request.auth.uid
+        && despues().estado == 'GENERADA'
+        && eventoEspejoCreate();
+
+      // Actualizar: o es una transición válida CON su evento espejo coherente
+      // (Regla Absoluta #2), o es edición de contenido sin cambiar estado
+      // (que NO requiere ultimoEvento).
+      allow update: if activo() && (
+        (transicionValida() && eventoEspejoUpdate()) || edicionContenido()
+      );
+
+      // Nunca borrar físicamente (soft-delete vía estado ANULADA — Regla Absoluta #7).
+      allow delete: if false;
+
+      // ---- Subcolección de trazabilidad (append-only) ----
+      match /historial_estados/{eventoId} {
+        allow read: if activo() && (
+          hasRole(['backoffice', 'admin', 'superadmin']) ||
+          get(/databases/$(database)/documents/cotizaciones/$(cotId)).data.prevendedorId == request.auth.uid ||
+          rol() == 'disenador'
+        );
+        // Se puede AGREGAR un evento (atribuido a uno mismo, con el rol REAL del
+        // que llama y con estadoNuevo presente), pero nunca editar ni borrar.
+        allow create: if activo()
+          && despues().usuarioId == request.auth.uid
+          && despues().rol == rol()
+          && despues().estadoNuevo is string;
+        allow update, delete: if false;
+      }
+    }
+
+    // ---------------- Denegación por defecto para todo lo demás ----------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

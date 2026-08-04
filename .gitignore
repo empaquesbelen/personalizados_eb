@@ -1,0 +1,32 @@
+# ============================================
+# SECRETOS — NUNCA subir al repositorio
+# ============================================
+secrets/
+*firebase-adminsdk*.json
+serviceAccountKey*.json
+.env
+.env.local
+.env.*.local
+
+# ============================================
+# Dependencias y builds
+# ============================================
+node_modules/
+dist/
+app/dist/
+build/
+
+# ============================================
+# Firebase (CLI)
+# ============================================
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# ============================================
+# Sistema / editor
+# ============================================
+.DS_Store
+Thumbs.db
+*.log

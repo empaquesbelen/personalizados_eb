@@ -1,0 +1,23 @@
+{
+  "name": "control-interno-eb-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Herramientas administrativas (Admin SDK + Firebase CLI) para el Sistema de Control Interno EB. NO es la app; la app vive en app/.",
+  "scripts": {
+    "seed:config": "node tools/seedConfig.js",
+    "deploy:rules": "firebase deploy --only firestore:rules --project cotizador-personalizados",
+    "deploy:indexes": "firebase deploy --only firestore:indexes --project cotizador-personalizados",
+    "deploy:firestore": "firebase deploy --only firestore --project cotizador-personalizados",
+    "test": "vitest run",
+    "test:dominio": "vitest run tests/dominio.test.js",
+    "test:rules": "firebase emulators:exec --only firestore --project cotizador-personalizados \"vitest run tests/firestore-rules.test.js\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.16.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-tools": "^13.29.0",
+    "vitest": "^3.2.4"
+  }
+}
