@@ -192,7 +192,7 @@ export async function generarPDFCotizacion(datos) {
   doc.setFont(undefined, 'normal');
   doc.setTextColor(...NEGRO);
   doc.text('Subtotal (sin IVA):', totalsX, y);
-  doc.text('IVA (13%):', totalsX, y + 7);
+  doc.text('IVA:', totalsX, y + 7);
   doc.setFont(undefined, 'bold');
   doc.text(crc(totales.subtotal), pageWidth - margin, y, { align: 'right' });
   doc.text(crc(totales.iva), pageWidth - margin, y + 7, { align: 'right' });

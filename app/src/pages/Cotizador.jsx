@@ -400,7 +400,7 @@ export default function Cotizador() {
                 <dd>{formatearColones(totales.subtotal)}</dd>
               </div>
               <div className="resumen-fila">
-                <dt>IVA (13%)</dt>
+                <dt>IVA</dt>
                 <dd>{formatearColones(totales.iva)}</dd>
               </div>
               <div className="resumen-fila resumen-total">

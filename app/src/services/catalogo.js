@@ -12,6 +12,7 @@
 // ============================================
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { normalizarTasaIva } from './calculo';
 
 // ---- Cachés en memoria (viven mientras la pestaña esté abierta) ----
 let cacheCatalogo = null; // Array<itemCatalogo>
@@ -120,6 +121,8 @@ export function normalizarProducto(datos = {}) {
     minimo: Math.max(1, Math.round(Number(datos.minimo) || 1)),
     precioSinIVA: Math.max(0, Number(datos.precioSinIVA) || 0),
     precioEnUsd: Boolean(datos.precioEnUsd),
+    // Tasa de IVA del producto (fracción: 0.13 = 13%). Default 13% general.
+    iva: normalizarTasaIva(datos.iva),
     // Condición asignada (id del doc en `condiciones`). '' = explícitamente
     // "ninguna". Se guarda desde el módulo de Catálogo (superadmin).
     condicionId: txt(datos.condicionId),

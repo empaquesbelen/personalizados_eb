@@ -495,7 +495,12 @@ export default function DetalleCotizacion() {
                         <td data-label="Precio sin IVA" className="col-num">
                           {formatearColones(p.precioSinIVA)}
                         </td>
-                        <td data-label="IVA" className="col-num">{formatearColones(p.iva)}</td>
+                        <td data-label="IVA" className="col-num">
+                          {formatearColones(p.iva)}
+                          {p.ivaTasa != null && (
+                            <span className="texto-suave"> ({Number((p.ivaTasa * 100).toFixed(2))}%)</span>
+                          )}
+                        </td>
                         <td data-label="Total con IVA" className="col-num">
                           {formatearColones(p.totalConIVA)}
                         </td>
@@ -519,7 +524,7 @@ export default function DetalleCotizacion() {
                 <dd>{formatearColones(totales.subtotal)}</dd>
               </div>
               <div className="resumen-fila">
-                <dt>IVA (13%)</dt>
+                <dt>IVA</dt>
                 <dd>{formatearColones(totales.iva)}</dd>
               </div>
               <div className="resumen-fila resumen-total">
@@ -741,7 +746,7 @@ function EdicionBackoffice({
             <dd>{formatearColones(totales.subtotal)}</dd>
           </div>
           <div className="resumen-fila">
-            <dt>IVA (13%)</dt>
+            <dt>IVA</dt>
             <dd>{formatearColones(totales.iva)}</dd>
           </div>
           <div className="resumen-fila resumen-total">

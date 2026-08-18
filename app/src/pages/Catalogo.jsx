@@ -19,9 +19,17 @@ import {
   crearCondicion,
 } from '../services/catalogo';
 import CampoCombo from '../components/CampoCombo';
+import { IVA_TASA, TASAS_IVA_CR } from '../services/calculo';
 
 // Valor centinela para la opción "crear una condición nueva" en el selector.
 const COND_NUEVA = '__nueva__';
+
+// Fracción → "13%", "1%", "0%" (para mostrar la tasa de IVA).
+function fmtIvaPct(fraccion) {
+  const n = Number(fraccion);
+  const pct = Number.isFinite(n) ? n * 100 : IVA_TASA * 100;
+  return `${Number(pct.toFixed(2))}%`;
+}
 
 // Campos de texto (combinación) con su ayuda para el superadmin.
 const CAMPOS_TEXTO = [
@@ -36,7 +44,7 @@ const CAMPOS_TEXTO = [
 function productoVacio() {
   return {
     cod: '', producto: '', tamano: '', impresion1: '', impresion2: '', material: '',
-    minimo: 1, precioSinIVA: 0, precioEnUsd: false, condicionId: '', activo: true,
+    minimo: 1, precioSinIVA: 0, precioEnUsd: false, iva: IVA_TASA, condicionId: '', activo: true,
   };
 }
 
@@ -238,6 +246,7 @@ export default function Catalogo() {
                 <th>Condición</th>
                 <th className="col-num">Mínimo</th>
                 <th className="col-num">Precio s/IVA</th>
+                <th className="col-num">IVA</th>
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
@@ -256,6 +265,7 @@ export default function Catalogo() {
                     {fmtPrecio(it)}
                     {it.precioEnUsd && <span className="badge-usd"> USD</span>}
                   </td>
+                  <td data-label="IVA" className="col-num">{fmtIvaPct(it.iva ?? IVA_TASA)}</td>
                   <td data-label="Estado">
                     <span className={`chip ${it.activo === false ? 'chip--anulada' : 'chip--completada'}`}>
                       {it.activo === false ? 'Inactivo' : 'Activo'}
@@ -294,7 +304,11 @@ export default function Catalogo() {
 // ---------------------------------------------------------------------------
 function ModalProducto({ inicial, opcionesPorCampo, condiciones, onCerrar, onGuardado }) {
   const esNuevo = !inicial.id;
-  const [form, setForm] = useState({ ...productoVacio(), ...inicial });
+  const [form, setForm] = useState(() => {
+    const base = { ...productoVacio(), ...inicial };
+    // `ivaOtra` (solo UI): true si la tasa guardada no es una de las estándar CR.
+    return { ...base, ivaOtra: !TASAS_IVA_CR.includes(Number(base.iva)) };
+  });
   const [error, setError] = useState('');
   const [guardando, setGuardando] = useState(false);
 
@@ -401,6 +415,43 @@ function ModalProducto({ inicial, opcionesPorCampo, condiciones, onCerrar, onGua
                 : 'En colones (₡). Debe ser mayor que 0.'}
             </span>
           </label>
+
+          <label className="campo">
+            <span>IVA del producto *</span>
+            <select
+              value={form.ivaOtra ? 'otra' : String(form.iva)}
+              onChange={(e) => {
+                if (e.target.value === 'otra') set({ ivaOtra: true });
+                else set({ iva: Number(e.target.value), ivaOtra: false });
+              }}
+            >
+              <option value="0.13">13% (general)</option>
+              <option value="0.04">4%</option>
+              <option value="0.02">2%</option>
+              <option value="0.01">1% (canasta básica)</option>
+              <option value="0">0% (exento)</option>
+              <option value="otra">Otra…</option>
+            </select>
+            <span className="campo-ayuda">
+              La mayoría lleva 13%. Ej.: el azúcar y la canasta básica llevan 1%.
+            </span>
+          </label>
+
+          {form.ivaOtra && (
+            <label className="campo">
+              <span>Otra tasa de IVA (%) *</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={Number((Number(form.iva) * 100).toFixed(2))}
+                onChange={(e) => set({ iva: (Number(e.target.value) || 0) / 100 })}
+                placeholder="Ej: 1"
+              />
+              <span className="campo-ayuda">Ingresá el porcentaje (ej. 1 para 1%).</span>
+            </label>
+          )}
 
           <label className="pago-check producto-check">
             <input

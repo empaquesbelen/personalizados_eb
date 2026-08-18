@@ -61,7 +61,13 @@ import {
   resolverCondicionProducto,
 } from '../app/src/services/catalogo.js';
 import { recolectarCondiciones } from '../app/src/components/lineasCotizacion.js';
-import { calcularLinea, IVA_TASA } from '../app/src/services/calculo.js';
+import {
+  calcularLinea,
+  IVA_TASA,
+  normalizarTasaIva,
+  construirProductoCotizacion,
+  calcularTotales,
+} from '../app/src/services/calculo.js';
 
 beforeEach(() => {
   state.dataset = [];
@@ -97,6 +103,7 @@ describe('normalizarProducto — coerciones y trims', () => {
       minimo: 25,
       precioSinIVA: 1500.5,
       precioEnUsd: true,
+      iva: 0.13, // sin iva en la entrada → default general 13%
       condicionId: '', // sin condición en la entrada → ''
       activo: true,
     });
@@ -228,6 +235,7 @@ describe('crearProducto — escribe payload normalizado e invalida caché', () =
       minimo: 10,
       precioSinIVA: 1200,
       precioEnUsd: false,
+      iva: 0.13,
       condicionId: '',
       activo: true,
     });
@@ -498,5 +506,80 @@ describe('recolectarCondiciones — únicas por artículo+texto', () => {
     state.condicionesDataset = [{ id: 'c1', articulo: 'Vasos', texto: 'TV' }];
     const r = await recolectarCondiciones([{ condicionId: 'c1' }, { condicionId: '' }]);
     expect(r).toEqual([{ articulo: 'Vasos', texto: 'TV' }]);
+  });
+});
+
+// ===========================================================================
+// IVA POR PRODUCTO (Regla Absoluta #10 — dinero/impuestos)
+// ===========================================================================
+describe('normalizarTasaIva', () => {
+  it('acepta fracciones válidas y clampea a [0,1]', () => {
+    expect(normalizarTasaIva(0.13)).toBe(0.13);
+    expect(normalizarTasaIva(0.01)).toBe(0.01);
+    expect(normalizarTasaIva(0)).toBe(0);
+    expect(normalizarTasaIva(1.5)).toBe(1);
+  });
+  it('valor inválido o negativo → default general 13%', () => {
+    expect(normalizarTasaIva(undefined)).toBe(IVA_TASA);
+    expect(normalizarTasaIva('x')).toBe(IVA_TASA);
+    expect(normalizarTasaIva(-0.1)).toBe(IVA_TASA);
+  });
+});
+
+describe('normalizarProducto — iva', () => {
+  it('default 13% si no se pasa; respeta la tasa reducida y el 0%', () => {
+    expect(normalizarProducto({ producto: 'X', tamano: 'Y' }).iva).toBe(0.13);
+    expect(normalizarProducto({ producto: 'Azúcar', tamano: 'kg', iva: 0.01 }).iva).toBe(0.01);
+    expect(normalizarProducto({ producto: 'X', tamano: 'Y', iva: 0 }).iva).toBe(0);
+  });
+});
+
+describe('calcularLinea — tasa de IVA por producto', () => {
+  const base = { minimo: 1, precioSinIVA: 1000, precioEnUsd: false };
+
+  it('usa item.iva sin tasa explícita (azúcar al 1%)', () => {
+    const c = calcularLinea({ ...base, iva: 0.01 }, 1, 0);
+    expect(c.ivaTasa).toBe(0.01);
+    expect(c.ivaBase).toBeCloseTo(10, 6); // 1% de 1000
+    expect(c.totalBaseConIVA).toBeCloseTo(1010, 6);
+  });
+
+  it('sin item.iva → default general 13% (productos legacy)', () => {
+    const c = calcularLinea(base, 1, 0);
+    expect(c.ivaTasa).toBe(0.13);
+    expect(c.ivaBase).toBeCloseTo(130, 6);
+  });
+
+  it('la tasa explícita tiene prioridad sobre item.iva', () => {
+    const c = calcularLinea({ ...base, iva: 0.01 }, 1, 0, 0.04);
+    expect(c.ivaTasa).toBe(0.04);
+    expect(c.ivaBase).toBeCloseTo(40, 6);
+  });
+
+  it('escala el IVA con la cantidad (1% de 1000 × 3)', () => {
+    const c = calcularLinea({ minimo: 1, precioSinIVA: 1000, iva: 0.01 }, 3, 0);
+    expect(c.totalProducto).toBeCloseTo(3000, 6);
+    expect(c.ivaLinea).toBeCloseTo(30, 6);
+    expect(c.totalProductoConIVA).toBeCloseTo(3030, 6);
+  });
+
+  it('construirProductoCotizacion snapshotea ivaTasa', () => {
+    const item = { producto: 'Azúcar', tamano: 'kg', minimo: 1, precioSinIVA: 1000, iva: 0.01 };
+    const p = construirProductoCotizacion(item, calcularLinea(item, 1, 0));
+    expect(p.ivaTasa).toBe(0.01);
+    expect(p.iva).toBeCloseTo(10, 6);
+  });
+});
+
+describe('calcularTotales — tasas de IVA mixtas', () => {
+  it('suma correctamente líneas con IVA distinto (13% y 1%)', () => {
+    const itemA = { producto: 'A', minimo: 1, precioSinIVA: 1000, iva: 0.13 };
+    const itemB = { producto: 'Azúcar', minimo: 1, precioSinIVA: 2000, iva: 0.01 };
+    const a = construirProductoCotizacion(itemA, calcularLinea(itemA, 1, 0)); // iva 130
+    const b = construirProductoCotizacion(itemB, calcularLinea(itemB, 1, 0)); // iva 20
+    const t = calcularTotales([a, b], 0);
+    expect(t.subtotal).toBeCloseTo(3000, 6);
+    expect(t.iva).toBeCloseTo(150, 6); // 130 + 20 (NO un 13% plano)
+    expect(t.total).toBeCloseTo(3150, 6);
   });
 });

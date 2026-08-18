@@ -12,7 +12,22 @@
 // con el legacy; cualquier cambio se prueba.
 // ============================================
 
-export const IVA_TASA = 0.13;
+export const IVA_TASA = 0.13; // Tasa GENERAL de Costa Rica (default por producto).
+
+// Tasas de IVA vigentes en CR (fracciones), para el selector del catálogo.
+// 13% general · 4% · 2% · 1% (canasta básica, p. ej. azúcar) · 0% exento.
+export const TASAS_IVA_CR = [0.13, 0.04, 0.02, 0.01, 0];
+
+/**
+ * Normaliza una tasa de IVA a FRACCIÓN en [0,1] (0.13 = 13%). Si el valor no es
+ * válido, cae al default general (IVA_TASA). No adivina %/fracción: espera una
+ * fracción (la UI convierte el % a fracción antes de guardar).
+ */
+export function normalizarTasaIva(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return IVA_TASA;
+  return Math.min(1, Math.round(n * 10000) / 10000);
+}
 
 /** Redondea a 2 decimales (para el total en USD, igual que convertToUSD legacy). */
 export function convertirUSD(montoColones, tipoCambio) {
@@ -63,18 +78,19 @@ export function ajustarCantidad(cantidad, minimo) {
  * el tipo de cambio. Devuelve los montos BASE (para la cantidad `minimo`) y los
  * montos ESCALADOS a la cantidad pedida.
  *
- * @param {object} item  Documento del catálogo ({ minimo, precioSinIVA, precioEnUsd, ... }).
+ * @param {object} item  Documento del catálogo ({ minimo, precioSinIVA, precioEnUsd, iva?, ... }).
  * @param {number} cantidad
  * @param {number} tipoCambio  Colones por USD (para convertir precios en dólares).
- * @param {number} [iva=IVA_TASA]
+ * @param {number} [iva]  Tasa explícita (fracción). Si se omite, se usa la del
+ *   producto (`item.iva`) y, en su defecto, IVA_TASA (13% general).
  * @returns {{
  *   valido: boolean, error?: string,
  *   minimo:number, precioBaseSinIVA:number, ivaBase:number, totalBaseConIVA:number,
- *   precioUnitario:number, cantidad:number,
+ *   precioUnitario:number, cantidad:number, ivaTasa:number,
  *   totalProducto:number, totalProductoConIVA:number, ivaLinea:number
  * }}
  */
-export function calcularLinea(item, cantidad, tipoCambio, iva = IVA_TASA) {
+export function calcularLinea(item, cantidad, tipoCambio, iva) {
   if (!item) {
     return { valido: false, error: 'Combinación de producto no encontrada en el catálogo.' };
   }
@@ -92,9 +108,17 @@ export function calcularLinea(item, cantidad, tipoCambio, iva = IVA_TASA) {
     return { valido: false, error: 'Tipo de cambio inválido para un producto en dólares.', minimo };
   }
 
+  // Tasa de IVA POR PRODUCTO: la explícita (si se pasa), o la del producto
+  // (item.iva), o el default general (13%). Productos legacy sin `iva` → 13%.
+  const tasa = Number.isFinite(Number(iva))
+    ? normalizarTasaIva(iva)
+    : Number.isFinite(Number(item.iva))
+      ? normalizarTasaIva(item.iva)
+      : IVA_TASA;
+
   // Precio SIN IVA en colones para la cantidad `minimo`.
   const precioBaseSinIVA = item.precioEnUsd ? rawPrecio * tc : rawPrecio;
-  const ivaBase = precioBaseSinIVA * iva;
+  const ivaBase = precioBaseSinIVA * tasa;
   const totalBaseConIVA = precioBaseSinIVA + ivaBase;
   const precioUnitario = totalBaseConIVA / minimo; // unitario CON IVA
 
@@ -111,6 +135,7 @@ export function calcularLinea(item, cantidad, tipoCambio, iva = IVA_TASA) {
     totalBaseConIVA,
     precioUnitario,
     cantidad: qty,
+    ivaTasa: tasa,
     totalProducto,
     totalProductoConIVA,
     ivaLinea,
@@ -134,7 +159,8 @@ export function construirProductoCotizacion(seleccion, calc) {
     cantidad: calc.cantidad,
     minimo: calc.minimo,
     precioSinIVA: calc.totalProducto, // subtotal de la línea (sin IVA)
-    iva: calc.ivaLinea, // IVA de la línea
+    iva: calc.ivaLinea, // IVA de la línea (monto)
+    ivaTasa: calc.ivaTasa, // tasa de IVA aplicada (fracción) — snapshot
     totalConIVA: calc.totalProductoConIVA, // total de la línea (con IVA)
     precioUnitario: calc.precioUnitario, // unitario con IVA
   };
