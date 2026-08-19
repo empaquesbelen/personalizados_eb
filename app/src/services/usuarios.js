@@ -44,7 +44,7 @@ function getAuthSecundaria() {
  * @throws el error de Firebase Auth/Firestore original (conserva `.code` para
  *         que la UI muestre un mensaje en español).
  */
-export async function crearUsuario({ nombre, email, password, rol, creadoPor }) {
+export async function crearUsuario({ nombre, email, password, rol, whatsapp = '', creadoPor }) {
   const auth2 = getAuthSecundaria();
 
   // 1) Crear la cuenta de Auth en la app secundaria (esto la deja "logueada"
@@ -58,6 +58,7 @@ export async function crearUsuario({ nombre, email, password, rol, creadoPor }) 
     await setDoc(doc(db, 'usuarios', uid), {
       nombre: nombre.trim(),
       email: email.trim(),
+      whatsapp: String(whatsapp || '').trim(), // contacto para el PDF de cotización
       rol,
       activo: true,
       createdAt: serverTimestamp(),
@@ -73,14 +74,17 @@ export async function crearUsuario({ nombre, email, password, rol, creadoPor }) 
 }
 
 /**
- * Actualiza el perfil de un usuario (rol y/o estado activo). No toca Auth.
+ * Actualiza el perfil de un usuario (rol, estado activo, nombre y/o whatsapp).
+ * No toca Auth ni el correo de login (el email queda fijo en la cuenta de Auth).
  * @param {string} uid
- * @param {{rol?:string, activo?:boolean}} cambios
+ * @param {{rol?:string, activo?:boolean, nombre?:string, whatsapp?:string}} cambios
  */
 export async function actualizarUsuario(uid, cambios = {}) {
   const datos = {};
   if (cambios.rol !== undefined) datos.rol = cambios.rol;
   if (cambios.activo !== undefined) datos.activo = cambios.activo;
+  if (cambios.nombre !== undefined) datos.nombre = String(cambios.nombre).trim();
+  if (cambios.whatsapp !== undefined) datos.whatsapp = String(cambios.whatsapp).trim();
   if (Object.keys(datos).length === 0) return;
   await updateDoc(doc(db, 'usuarios', uid), datos);
 }

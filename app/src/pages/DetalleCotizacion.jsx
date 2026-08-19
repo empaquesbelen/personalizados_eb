@@ -314,8 +314,12 @@ export default function DetalleCotizacion() {
       await generarPDFCotizacion({
         consecutivo: cot.consecutivo || '',
         config,
-        // Datos del vendedor guardados en la cotización; si falta info, se degrada.
-        vendedor: { nombre: cot.prevendedorNombre || 'N/D', whatsapp: '', email: '' },
+        // Datos del asesor snapshoteados en la cotización; si falta info, se degrada.
+        vendedor: {
+          nombre: cot.prevendedorNombre || 'N/D',
+          whatsapp: cot.prevendedorWhatsapp || '',
+          email: cot.prevendedorEmail || '',
+        },
         cliente: cot.cliente || {},
         productos: cot.productos || [],
         totales: cot.totales || {},

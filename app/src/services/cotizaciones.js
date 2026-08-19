@@ -151,6 +151,10 @@ export async function crearCotizacion({
       estado: ESTADOS.GENERADA,
       prevendedorId: prevendedor.id,
       prevendedorNombre: prevendedor.nombre || prevendedor.email || '',
+      // Contacto del asesor snapshoteado (para el PDF, incluso si luego lo
+      // regenera el backoffice, que no puede leer el doc del usuario).
+      prevendedorWhatsapp: prevendedor.whatsapp || '',
+      prevendedorEmail: prevendedor.email || '',
       cliente: cliente || {},
       productos: productos || [],
       totales: totales || {},

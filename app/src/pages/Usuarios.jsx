@@ -157,7 +157,7 @@ export default function Usuarios() {
             <thead>
               <tr>
                 <th>Nombre</th>
-                <th>Correo</th>
+                <th>Contacto</th>
                 <th>Rol</th>
                 <th>Estado</th>
                 <th>Acciones</th>
@@ -173,7 +173,10 @@ export default function Usuarios() {
                       {u.nombre || '—'}
                       {esYoMismo && <span className="texto-suave"> (vos)</span>}
                     </td>
-                    <td data-label="Correo" className="texto-suave">{u.email || '—'}</td>
+                    <td data-label="Contacto" className="texto-suave">
+                      {u.email || '—'}
+                      {u.whatsapp ? <div>{u.whatsapp}</div> : null}
+                    </td>
                     <td data-label="Rol">
                       <span className={`badge rol-${u.rol}`}>{ROL_LABEL[u.rol] || u.rol || '—'}</span>
                     </td>
@@ -234,6 +237,7 @@ export default function Usuarios() {
 function ModalCrear({ creadoPor, onCerrar, onCreado }) {
   const [nombre, setNombre] = useState('');
   const [email, setEmail] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
   const [password, setPassword] = useState('');
   const [rol, setRol] = useState(ROLES.PREVENDEDOR);
   const [error, setError] = useState('');
@@ -250,7 +254,7 @@ function ModalCrear({ creadoPor, onCerrar, onCreado }) {
 
     setGuardando(true);
     try {
-      await crearUsuario({ nombre, email, password, rol, creadoPor });
+      await crearUsuario({ nombre, email, password, rol, whatsapp, creadoPor });
       onCreado(nombre.trim());
     } catch (err) {
       console.error('Error creando usuario:', err);
@@ -301,6 +305,18 @@ function ModalCrear({ creadoPor, onCerrar, onCreado }) {
         </label>
 
         <label className="campo">
+          <span>WhatsApp / teléfono</span>
+          <input
+            type="tel"
+            value={whatsapp}
+            onChange={(e) => setWhatsapp(e.target.value)}
+            placeholder="Ej: 8888-8888"
+            autoComplete="off"
+          />
+          <span className="campo-ayuda">Aparece como contacto del asesor en el PDF de la cotización.</span>
+        </label>
+
+        <label className="campo">
           <span>Contraseña</span>
           <input
             type="password"
@@ -340,6 +356,8 @@ function ModalCrear({ creadoPor, onCerrar, onCreado }) {
 // Modal: editar usuario (rol + activar/desactivar) con protección de sí mismo.
 // ---------------------------------------------------------------------------
 function ModalEditar({ usuario, esYoMismo, onCerrar, onGuardado }) {
+  const [nombre, setNombre] = useState(usuario.nombre || '');
+  const [whatsapp, setWhatsapp] = useState(usuario.whatsapp || '');
   const [rol, setRol] = useState(usuario.rol || ROLES.PREVENDEDOR);
   const [activo, setActivo] = useState(usuario.activo !== false);
   const [error, setError] = useState('');
@@ -347,21 +365,32 @@ function ModalEditar({ usuario, esYoMismo, onCerrar, onGuardado }) {
 
   useEscape(onCerrar, guardando);
 
-  const sinCambios = rol === (usuario.rol || ROLES.PREVENDEDOR) && activo === (usuario.activo !== false);
+  const sinCambios =
+    nombre.trim() === (usuario.nombre || '').trim() &&
+    whatsapp.trim() === (usuario.whatsapp || '').trim() &&
+    rol === (usuario.rol || ROLES.PREVENDEDOR) &&
+    activo === (usuario.activo !== false);
 
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
+    if (!nombre.trim()) return setError('El nombre es obligatorio.');
 
     // Protección simple en UI: el superadmin no puede quitarse su propio rol
     // ni desactivarse a sí mismo (las reglas no lo impiden; esto evita el error).
+    // El nombre y el WhatsApp sí se pueden editar siempre (incluida su cuenta).
     const rolFinal = esYoMismo ? usuario.rol : rol;
     const activoFinal = esYoMismo ? true : activo;
 
     setGuardando(true);
     try {
-      await actualizarUsuario(usuario.id, { rol: rolFinal, activo: activoFinal });
-      onGuardado(usuario.nombre || usuario.email || 'usuario');
+      await actualizarUsuario(usuario.id, {
+        rol: rolFinal,
+        activo: activoFinal,
+        nombre: nombre.trim(),
+        whatsapp: whatsapp.trim(),
+      });
+      onGuardado(nombre.trim() || usuario.email || 'usuario');
     } catch (err) {
       console.error('Error actualizando usuario:', err);
       setError(mensajeError(err));
@@ -389,9 +418,40 @@ function ModalEditar({ usuario, esYoMismo, onCerrar, onGuardado }) {
 
         {esYoMismo && (
           <p className="nota-fase">
-            Esta es tu propia cuenta: no podés cambiar tu rol ni desactivarte para no perder el acceso.
+            Esta es tu propia cuenta: podés editar tu nombre y contacto, pero no cambiar tu rol ni
+            desactivarte (para no perder el acceso).
           </p>
         )}
+
+        <label className="campo">
+          <span>Nombre</span>
+          <input
+            type="text"
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Nombre y apellido"
+            autoComplete="off"
+            autoFocus
+          />
+        </label>
+
+        <label className="campo">
+          <span>Correo</span>
+          <input type="email" value={usuario.email || ''} disabled readOnly />
+          <span className="campo-ayuda">Es el correo de acceso; no se edita desde acá.</span>
+        </label>
+
+        <label className="campo">
+          <span>WhatsApp / teléfono</span>
+          <input
+            type="tel"
+            value={whatsapp}
+            onChange={(e) => setWhatsapp(e.target.value)}
+            placeholder="Ej: 8888-8888"
+            autoComplete="off"
+          />
+          <span className="campo-ayuda">Aparece como contacto del asesor en el PDF de la cotización.</span>
+        </label>
 
         <label className="campo">
           <span>Rol</span>
@@ -427,7 +487,7 @@ function ModalEditar({ usuario, esYoMismo, onCerrar, onGuardado }) {
           <button type="button" className="btn btn-ghost" onClick={onCerrar} disabled={guardando}>
             Cancelar
           </button>
-          <button type="submit" className="btn btn-primario" disabled={guardando || sinCambios || esYoMismo}>
+          <button type="submit" className="btn btn-primario" disabled={guardando || sinCambios}>
             {guardando ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>
