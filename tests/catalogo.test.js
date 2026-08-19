@@ -60,7 +60,7 @@ import {
   crearCondicion,
   resolverCondicionProducto,
 } from '../app/src/services/catalogo.js';
-import { recolectarCondiciones } from '../app/src/components/lineasCotizacion.js';
+import { recolectarCondiciones, reconstruirLineas } from '../app/src/components/lineasCotizacion.js';
 import {
   calcularLinea,
   IVA_TASA,
@@ -568,6 +568,39 @@ describe('calcularLinea — tasa de IVA por producto', () => {
     const p = construirProductoCotizacion(item, calcularLinea(item, 1, 0));
     expect(p.ivaTasa).toBe(0.01);
     expect(p.iva).toBeCloseTo(10, 6);
+  });
+});
+
+describe('reconstruirLineas — preserva la tasa de IVA snapshoteada (producto huérfano)', () => {
+  it('si la combinación ya no está en el catálogo, conserva ivaTasa del snapshot (azúcar 1%, no salta a 13%)', async () => {
+    // Catálogo VACÍO → buscarItem no encuentra la combinación → se sintetiza
+    // el item desde lo guardado. La cotización guardó ivaTasa=0.01 (1%).
+    state.dataset = [];
+    const productoGuardado = {
+      producto: 'Azúcar',
+      tamano: 'kg',
+      minimo: 1,
+      cantidad: 3,
+      precioSinIVA: 3000, // subtotal de línea sin IVA (base 1000 * 3)
+      iva: 30,
+      ivaTasa: 0.01, // snapshot de la tasa reducida
+      totalConIVA: 3030,
+    };
+    const [linea] = await reconstruirLineas([productoGuardado]);
+    // El item sintetizado debe llevar la tasa reducida, NO el default 13%.
+    expect(linea.item.iva).toBe(0.01);
+
+    // Y al recalcular con ese item, el IVA sigue al 1%, no salta a 13%.
+    const c = calcularLinea(linea.item, linea.cantidad, 0);
+    expect(c.ivaTasa).toBe(0.01);
+  });
+
+  it('producto guardado sin ivaTasa (legacy) → fallback 13% general', async () => {
+    state.dataset = [];
+    const [linea] = await reconstruirLineas([
+      { producto: 'X', tamano: 'Y', minimo: 1, cantidad: 1, precioSinIVA: 1000 },
+    ]);
+    expect(linea.item.iva).toBe(0.13);
   });
 });
 

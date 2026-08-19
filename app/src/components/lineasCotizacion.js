@@ -9,7 +9,7 @@
 // Se apoya en services/catalogo.js y services/calculo.js.
 // ============================================
 import { buscarItem, claveItem, resolverCondicionProducto } from '../services/catalogo';
-import { ajustarCantidad } from '../services/calculo';
+import { ajustarCantidad, normalizarTasaIva } from '../services/calculo';
 
 let contadorLineas = 0;
 
@@ -50,6 +50,11 @@ function itemDesdeProductoGuardado(p) {
     minimo,
     precioSinIVA: baseSinIVA, // ya en colones
     precioEnUsd: false, // el subtotal guardado ya estaba en colones
+    // Preservar la tasa de IVA SNAPSHOTEADA en la cotización (Regla #10): si la
+    // combinación ya no existe en el catálogo, sin esto el recálculo caería al
+    // 13% general y cambiaría en silencio el impuesto de un producto de tasa
+    // reducida (p. ej. azúcar al 1%). Fallback 13% solo si no hay snapshot.
+    iva: normalizarTasaIva(p?.ivaTasa),
   };
 }
 
