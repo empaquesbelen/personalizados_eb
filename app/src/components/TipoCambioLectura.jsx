@@ -1,37 +1,17 @@
 // ============================================
 // Tipo de cambio (SOLO lectura) — Módulo Cotizador.
 // ------------------------------------------------------------
-// El tipo de cambio NO es editable: sale de config/general (BCCR o manual). Se
-// muestra como texto de solo lectura, con la fuente y la fecha si están.
+// El tipo de cambio NO es editable: sale del BCCR en vivo o, si esa consulta
+// falla, de config/general (último valor guardado o manual). Se muestra como
+// texto de solo lectura, con la fuente y la fecha.
 //
-// DINERO = CUIDADO (Regla Absoluta #10): si el valor del BCCR quedó viejo,
-// mostramos un aviso visible para que nunca se cotice a ciegas con un tipo de
-// cambio desactualizado. La antigüedad se mide en días HÁBILES para no dar
-// falsos positivos por el fin de semana (el BCCR no publica sáb/dom).
+// DINERO = CUIDADO (Regla Absoluta #10): si el valor no es del BCCR o quedó
+// viejo (ver services/tipoCambio.js), se muestra un aviso visible y el
+// cotizador exige confirmarlo antes de generar. Si la consulta en vivo falló,
+// `onReintentar` permite volver a consultar sin recargar la página.
 // ============================================
 import { formatearColones } from '../services/calculo';
-
-function fmtFecha(fecha) {
-  if (!(fecha instanceof Date) || Number.isNaN(fecha.getTime())) return '';
-  return fecha.toLocaleDateString('es-CR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-// Días hábiles (lun–vie) transcurridos ESTRICTAMENTE entre `fecha` y hoy.
-function diasHabilesDesde(fecha) {
-  if (!(fecha instanceof Date) || Number.isNaN(fecha.getTime())) return 0;
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const d = new Date(fecha);
-  d.setHours(0, 0, 0, 0);
-  let n = 0;
-  d.setDate(d.getDate() + 1);
-  while (d <= hoy) {
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) n += 1;
-    d.setDate(d.getDate() + 1);
-  }
-  return n;
-}
+import { evaluarTipoCambio, formatearFechaTC } from '../services/tipoCambio';
 
 const ICONO_CANDADO = (
   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -48,38 +28,62 @@ const ICONO_ALERTA = (
   </svg>
 );
 
-export default function TipoCambioLectura({ config, tipoCambio, fuente, fecha, nota }) {
+export default function TipoCambioLectura({ config, tipoCambio, fuente, fecha, nota, onReintentar, reintentando = false }) {
   const tc = Number(tipoCambio ?? config?.tipoCambio) || 0;
   const fechaReal = fecha ?? config?.tipoCambioFecha ?? null;
-  const fechaFmt = fmtFecha(fechaReal);
-  const esBccr = (fuente ?? config?.tipoCambioFuente) === 'BCCR';
+  const fechaFmt = formatearFechaTC(fechaReal);
+  const fuenteReal = fuente ?? config?.tipoCambioFuente;
+  const esBccr = fuenteReal === 'BCCR';
+  const origen = config?.tipoCambioOrigen;
 
-  // El aviso de "desactualizado" solo aplica al valor EN VIVO de config (cuando
-  // NO se pasa `nota`). En el detalle, `nota` fija el TC ya congelado de la
-  // cotización, que por diseño no cambia.
-  const stale = !nota && esBccr && diasHabilesDesde(fechaReal) >= 2;
+  // El aviso solo aplica al valor con el que se va a cotizar (cuando NO se pasa
+  // `nota`). En el detalle, `nota` fija el TC ya congelado de la cotización,
+  // que por diseño no cambia.
+  const { requiereConfirmacion, motivo } = evaluarTipoCambio({
+    tipoCambioFuente: fuenteReal,
+    tipoCambioFecha: fechaReal,
+  });
+  const alerta = !nota && requiereConfirmacion;
+  const puedeReintentar = !nota && typeof onReintentar === 'function' && origen && origen !== 'vivo';
 
-  const ayuda =
-    nota ??
-    (esBccr
-      ? `Fuente: BCCR${fechaFmt ? ` · actualizado ${fechaFmt}` : ''} · no editable`
-      : 'Valor manual de respaldo — el tipo de cambio del BCCR aún no se ha cargado · no editable');
+  let ayuda = nota;
+  if (!ayuda) {
+    if (!esBccr) {
+      ayuda = 'Valor manual de respaldo — no se pudo obtener el tipo de cambio del BCCR · no editable';
+    } else if (origen === 'config') {
+      ayuda = `Fuente: BCCR · último valor guardado${fechaFmt ? ` del ${fechaFmt}` : ''}; la consulta en vivo falló · no editable`;
+    } else {
+      ayuda = `Fuente: BCCR${fechaFmt ? ` · ${fechaFmt}` : ''}${origen === 'vivo' ? ' · en vivo' : ''} · no editable`;
+    }
+  }
 
   return (
     <div className="campo tc-lectura" aria-label="Tipo de cambio (no editable)">
       <span>Tipo de cambio</span>
-      <div className={`tc-valor${stale ? ' tc-valor--alerta' : ''}`} role="group">
+      <div className={`tc-valor${alerta ? ' tc-valor--alerta' : ''}`} role="group">
         <span className="tc-monto">$1 = {formatearColones(tc)}</span>
         <span className="tc-candado" aria-hidden="true">
           {ICONO_CANDADO}
         </span>
       </div>
       <span className="campo-ayuda">{ayuda}</span>
-      {stale && (
+      {alerta && (
         <span className="tc-alerta" role="alert">
           {ICONO_ALERTA}
-          Puede estar desactualizado (última: {fechaFmt}). Verificá el tipo de cambio antes de cotizar.
+          {motivo === 'desactualizado'
+            ? `Desactualizado (última: ${fechaFmt}). Para cotizar con este valor tendrás que confirmarlo.`
+            : 'No es el tipo de cambio del BCCR. Para cotizar con este valor tendrás que confirmarlo.'}
         </span>
+      )}
+      {puedeReintentar && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-chico tc-reintentar"
+          onClick={onReintentar}
+          disabled={reintentando}
+        >
+          {reintentando ? 'Consultando al BCCR…' : 'Reintentar consulta al BCCR'}
+        </button>
       )}
     </div>
   );

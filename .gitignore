@@ -24,6 +24,9 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 
+# Netlify (CLI: artefactos de `netlify build` / `functions:serve`)
+.netlify/
+
 # ============================================
 # Sistema / editor
 # ============================================

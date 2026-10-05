@@ -5,7 +5,8 @@
 // de combinaciones + filtros + mini-carrito + "Agregar seleccionados" (NO por
 // cascada de menús). La tabla de productos agregados NO es editable salvo la
 // cantidad, que respeta múltiplos del mínimo con redondeo hacia arriba. El tipo
-// de cambio NO es editable: sale de config (BCCR o manual).
+// de cambio NO es editable: BCCR en vivo o, si falla, el de config; si es viejo
+// o manual, generar exige una confirmación explícita.
 //
 // Flujo: al "Generar cotización" se crea y guarda la cotización en estado
 // GENERADA (services/cotizaciones.crearCotizacion) Y se genera el PDF. Se
@@ -17,10 +18,12 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   getConfig,
+  reintentarTipoCambio,
   cargarCatalogoBusqueda,
   productosDeCatalogo,
   resolverCondicionProducto,
 } from '../services/catalogo';
+import { evaluarTipoCambio, formatearFechaTC } from '../services/tipoCambio';
 import {
   ajustarCantidad,
   calcularLinea,
@@ -71,8 +74,16 @@ export default function Cotizador() {
   const [resultado, setResultado] = useState(null); // { consecutivo, pdfOk }
   const [condicionesPreview, setCondicionesPreview] = useState([]); // [{articulo,texto}]
 
-  // Tipo de cambio: SOLO lectura, desde config (BCCR o manual).
+  // Tipo de cambio: SOLO lectura (BCCR en vivo; si falla, el de config).
   const tipoCambio = Number(config?.tipoCambio) || 0;
+  const [reintentandoTc, setReintentandoTc] = useState(false);
+  // Si el tipo de cambio es viejo o manual, generar exige confirmarlo. La
+  // confirmación queda atada al valor exacto: si cambia (p. ej. al reintentar),
+  // hay que volver a confirmar.
+  const evalTc = useMemo(() => evaluarTipoCambio(config), [config]);
+  const claveTc = `${tipoCambio}|${config?.tipoCambioFecha?.getTime?.() ?? ''}`;
+  const [tcConfirmadoPara, setTcConfirmadoPara] = useState(null);
+  const tcConfirmado = !evalTc.requiereConfirmacion || tcConfirmadoPara === claveTc;
 
   // Carga inicial: config + catálogo de búsqueda (todo el catálogo, cacheado).
   useEffect(() => {
@@ -167,7 +178,19 @@ export default function Cotizador() {
   const nombreClienteOk = cliente.nombre.trim().length > 0;
   const tipoCambioOk = tipoCambio > 0;
   const hayLineasInvalidas = lineasCalc.some((l) => !l.calc);
-  const puedeGenerar = nombreClienteOk && tipoCambioOk && productosValidos.length > 0 && !hayLineasInvalidas;
+  const puedeGenerar =
+    nombreClienteOk && tipoCambioOk && tcConfirmado && productosValidos.length > 0 && !hayLineasInvalidas;
+
+  async function onReintentarTc() {
+    setReintentandoTc(true);
+    try {
+      setConfig(await reintentarTipoCambio());
+    } catch (e) {
+      console.error('Error reconsultando el tipo de cambio:', e);
+    } finally {
+      setReintentandoTc(false);
+    }
+  }
 
   async function onGenerar() {
     setAviso('');
@@ -177,6 +200,10 @@ export default function Cotizador() {
     }
     if (!tipoCambioOk) {
       setAviso('El tipo de cambio de configuración no es válido. Revisá config/general.');
+      return;
+    }
+    if (!tcConfirmado) {
+      setAviso('Confirmá el tipo de cambio antes de generar: no es el vigente del BCCR.');
       return;
     }
     if (productosValidos.length === 0) {
@@ -253,6 +280,7 @@ export default function Cotizador() {
     setLineas([]);
     setResultado(null);
     setAviso('');
+    setTcConfirmadoPara(null); // cada cotización confirma su propio tipo de cambio
   }
 
   if (cargandoCatalogo) {
@@ -341,7 +369,7 @@ export default function Cotizador() {
                   autoComplete="off"
                 />
               </label>
-              <TipoCambioLectura config={config} />
+              <TipoCambioLectura config={config} onReintentar={onReintentarTc} reintentando={reintentandoTc} />
             </div>
           </section>
 
@@ -412,6 +440,21 @@ export default function Cotizador() {
                 <dd>${(Number(totales.totalUSD) || 0).toFixed(2)}</dd>
               </div>
             </dl>
+
+            {evalTc.requiereConfirmacion && (
+              <label className="tc-confirmacion">
+                <input
+                  type="checkbox"
+                  checked={tcConfirmadoPara === claveTc}
+                  onChange={(e) => setTcConfirmadoPara(e.target.checked ? claveTc : null)}
+                />
+                <span>
+                  {evalTc.motivo === 'desactualizado'
+                    ? `Confirmo que cotizo con el tipo de cambio del ${formatearFechaTC(config?.tipoCambioFecha)} ($1 = ${formatearColones(tipoCambio)}), que no es el del día.`
+                    : `Confirmo que cotizo con el tipo de cambio manual de respaldo ($1 = ${formatearColones(tipoCambio)}), sin dato del BCCR.`}
+                </span>
+              </label>
+            )}
 
             {aviso && (
               <div className="alerta-error" role="alert">

@@ -138,8 +138,15 @@ stateDiagram-v2
 
 ### `config/general`  (singleton — importado de `Configuracion`)
 ```
-{ tipoCambioManual, iva, nombreEmpresa, telefono, direccion, cedulaJuridica }
+{ tipoCambioManual, iva, nombreEmpresa, telefono, direccion, cedulaJuridica,
+  tipoCambio?, tipoCambioFuente?, tipoCambioFecha?,   // último valor BCCR guardado (respaldo)
+  tipoCambioEndpoint? }                                // OBSOLETO (Apps Script): ya no se usa
 ```
+> **Tipo de cambio para cotizar** (`services/catalogo.getConfig`): se consulta en
+> vivo a la Netlify Function `/.netlify/functions/tipo-cambio` (§6). Si falla, se
+> usa `tipoCambio` de este doc (o `tipoCambioManual`) y se registra el motivo en
+> consola. Si el valor es manual o tiene 2+ días hábiles, el cotizador exige una
+> **confirmación explícita** antes de generar (`services/tipoCambio.evaluarTipoCambio`).
 
 ### `condiciones/{articulo}`  (importado de `Condiciones`)
 ```
@@ -186,6 +193,6 @@ stateDiagram-v2
 
 ## 6. Pendientes técnicos abiertos
 
-- **Tipo de cambio BCCR:** sin Cloud Functions (plan Spark), el navegador no puede llamar al BCCR por CORS. Opciones a decidir en Fase 4: (a) el admin fija el tipo de cambio manual en `config/general`; (b) reutilizar un mini-endpoint Apps Script solo para el tipo de cambio; (c) mover a Blaze + función programada. **Default provisional:** tipo de cambio manual editable por admin, con opción de actualizar.
+- ~~**Tipo de cambio BCCR:** sin Cloud Functions (plan Spark), el navegador no puede llamar al BCCR (requiere token secreto).~~ **RESUELTO (oct 2026):** Netlify Function `app/netlify/functions/tipo-cambio.mjs` (mismo sitio, `/.netlify/functions/tipo-cambio`) consulta la API SDDE del BCCR (indicador 318, venta) con el token en la variable de entorno `BCCR_TOKEN` de Netlify; respuesta cacheada 10 min en el CDN. Reemplaza al Web App de Apps Script (`apps-script-tipo-cambio/`), que el 05/10/2026 tardaba ~18 s de mediana y fallaba >6 s en el 76% de las consultas (AbortError en el navegador). `config/general.tipoCambio` queda como respaldo; `tools/actualizarTipoCambio.js` lo actualiza (no está programado).
 - ~~**Numeración consecutiva:** portar la lógica del legacy (`[3 letras vendedor]+[ddMM]+[secuencia]`) usando una transacción de Firestore o un contador.~~ **RESUELTO:** colección `contadores/{prefijo}` + reserva atómica en la misma `runTransaction` que crea la cotización (`services/cotizaciones.crearCotizacion`, helpers en `services/consecutivo.js`). Contador por-día-por-prefijo; secuencia del contador (no del tiempo). Reglas: solo `prevendedor`/`superadmin`, solo incrementos +1. Ver §4/§5.
 - **Primer superadmin (bootstrap):** definir cómo se crea el primer usuario superadmin (script local con Admin SDK vs. alta manual en consola Firebase + marcar su rol en `usuarios` una vez).

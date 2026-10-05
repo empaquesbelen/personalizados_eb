@@ -6,16 +6,25 @@
 # El redirect /* → /index.html es OBLIGATORIO para una SPA con React Router:
 # sin él, refrescar o entrar directo a /cotizador o /catalogo daría 404.
 #
-# Variables de entorno: NO son obligatorias (la config de Firebase tiene
-# valores por defecto en app/src/lib/firebase.js y son públicas). Se pueden
-# definir VITE_FIREBASE_* en Netlify para apuntar a otro proyecto. NINGÚN
-# secreto (token BCCR / service account) va acá: son solo del lado servidor.
+# Variables de entorno: las VITE_FIREBASE_* NO son obligatorias (la config de
+# Firebase tiene valores por defecto en app/src/lib/firebase.js y son
+# públicas). La ÚNICA obligatoria es `BCCR_TOKEN` (token de la API SDDE del
+# BCCR), que usa la función app/netlify/functions/tipo-cambio.mjs. Se define en
+# la UI de Netlify (Site configuration → Environment variables), con alcance
+# que incluya "Functions". NINGÚN secreto (token BCCR / service account) va
+# en este archivo ni en el repo.
 # ============================================================
 
 [build]
   base = "app"
   command = "npm run build"
   publish = "dist"
+
+# Funciones del lado servidor (ruta relativa a `base`): proxy del tipo de
+# cambio del BCCR → /.netlify/functions/tipo-cambio. Las rutas /.netlify/* no
+# las intercepta el redirect SPA de abajo.
+[functions]
+  directory = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "22"

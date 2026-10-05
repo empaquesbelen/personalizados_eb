@@ -26,7 +26,7 @@ import {
   resumirEdicionContenido,
   resumirPago,
 } from '../services/cotizaciones';
-import { getConfig, cargarCatalogoBusqueda, productosDeCatalogo } from '../services/catalogo';
+import { getConfigBase, cargarCatalogoBusqueda, productosDeCatalogo } from '../services/catalogo';
 import {
   ajustarCantidad,
   calcularLinea,
@@ -309,7 +309,9 @@ export default function DetalleCotizacion() {
     setAviso(null);
     setGenerandoPdf(true);
     try {
-      const config = await getConfig();
+      // Solo datos de la empresa: el PDF imprime el tipo de cambio GUARDADO en la
+      // cotización, así que no se consulta el BCCR en vivo (no hay que esperarlo).
+      const config = await getConfigBase();
       const condiciones = await recolectarCondiciones(cot.productos || []);
       await generarPDFCotizacion({
         consecutivo: cot.consecutivo || '',

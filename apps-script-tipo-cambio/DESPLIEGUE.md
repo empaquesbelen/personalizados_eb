@@ -1,5 +1,11 @@
 # Apps Script del Tipo de Cambio (nueva API SDDE del BCCR)
 
+> **⛔ REEMPLAZADO (oct 2026)** por la Netlify Function `app/netlify/functions/tipo-cambio.mjs`.
+> Medido el 05/10/2026: este Web App tardaba ~18 s de mediana, superaba los 6 s del
+> navegador en el 76% de las consultas y ~21% fallaba con 404 de Google. La app ya no lo
+> usa (ignora `config/general.tipoCambioEndpoint`). Se conserva solo como referencia;
+> la implementación desplegada se puede archivar cuando la función esté verificada en producción.
+
 > El BCCR descontinuó el método viejo (`wsindicadoreseconomicos.asmx`) el **30/06/2026**.
 > Ahora se usa la **API SDDE** (`apim.bccr.fi.cr`), que requiere un **Bearer Token**.
 > El token vive SOLO en el Apps Script (servidor de Google), nunca en el navegador.

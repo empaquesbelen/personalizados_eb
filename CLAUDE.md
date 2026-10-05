@@ -22,6 +22,7 @@ Sistema **interno de control** para Empaques Belén (Costa Rica). El antiguo cot
 | Frontend | **React + Vite** (SPA modular, vistas por rol) |
 | Tiempo real | Firestore `onSnapshot` |
 | Hosting | **Netlify** (cuenta `empaquesbelen.dev@gmail.com`) |
+| Funciones servidor | **Netlify Functions** (`app/netlify/functions/`) — proxy del tipo de cambio BCCR; token en la env var `BCCR_TOKEN` de Netlify |
 | Plan Firebase | **Spark (gratis)** por ahora — sin Cloud Functions. Correos: fuera del sistema (Outlook manual). |
 
 **Firebase config** (la `apiKey` web es pública por diseño; la seguridad vive en las Rules): proyecto `cotizador-personalizados`, ver `app/src/lib/firebase.js` cuando exista.

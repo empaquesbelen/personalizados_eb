@@ -18,7 +18,9 @@ import { normalizarTasaIva } from './calculo';
 let cacheCatalogo = null; // Array<itemCatalogo>
 let promesaCatalogo = null; // evita cargas duplicadas concurrentes
 let cacheBusqueda = null; // Array<itemCatalogo + searchableNormalized + clave>
-let cacheConfig = null;
+let cacheConfigBase = null; // config/general tal cual (sin consulta en vivo)
+let promesaConfigBase = null;
+let cacheConfig = null; // config + tipo de cambio en vivo (solo si la consulta salió bien)
 let promesaConfig = null;
 let cacheCondiciones = null; // Array<{ articulo, texto }>
 let promesaCondiciones = null;
@@ -83,6 +85,7 @@ export async function cargarCatalogo() {
 export function invalidarCache() {
   cacheCatalogo = null;
   cacheBusqueda = null;
+  cacheConfigBase = null;
   cacheConfig = null;
   cacheCondiciones = null;
 }
@@ -448,72 +451,87 @@ function aFecha(valor) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Tipo de cambio en vivo: Netlify Function del MISMO sitio
+// (app/netlify/functions/tipo-cambio.mjs), que consulta la API SDDE del BCCR
+// con el token del lado servidor. Reemplaza al Web App de Apps Script: el campo
+// `config/general.tipoCambioEndpoint` ya NO se usa.
+export const TIPO_CAMBIO_URL = '/.netlify/functions/tipo-cambio';
+// La función corta al BCCR a los 6 s y responde con un error explicable, así
+// que este límite solo salta si la propia función no contesta.
+export const TIMEOUT_TIPO_CAMBIO_MS = 8000;
+
 /**
- * Obtiene el tipo de cambio en vivo desde el Apps Script del BCCR (empresa).
- * @param {string} url URL /exec del Web App. @returns {Promise<{valor,fecha}|null>}
+ * Consulta el tipo de cambio en vivo. Nunca lanza: devuelve el valor o el
+ * MOTIVO del fallo, para poder registrarlo (antes un 404 caía en silencio).
+ * @returns {Promise<{ok:true, valor:number, fecha:Date} | {ok:false, motivo:string}>}
  */
-async function fetchTipoCambioEndpoint(url, timeoutMs = 6000) {
+async function fetchTipoCambioEnVivo(timeoutMs = TIMEOUT_TIPO_CAMBIO_MS) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
   try {
-    const res = await fetch(url, { redirect: 'follow', signal: ctrl.signal });
-    if (!res.ok) return null;
-    const json = await res.json();
-    // El Apps Script puede responder { success:false, ... } si el BCCR falla:
-    // en ese caso no hay tipoCambio y caemos al valor de config (fallback).
-    const valor = Number(json?.data?.tipoCambio ?? json?.tipoCambio);
-    if (!valor || valor <= 0) return null;
-    // La fecha llega en ISO (yyyy-MM-dd) desde el SDDE; aFecha la ancla local.
-    return { valor, fecha: aFecha(json?.data?.fecha ?? json?.fecha) || new Date() };
+    res = await fetch(TIPO_CAMBIO_URL, { signal: ctrl.signal });
+  } catch (e) {
+    return ctrl.signal.aborted
+      ? { ok: false, motivo: `sin respuesta en ${timeoutMs / 1000} s` }
+      : { ok: false, motivo: `error de red: ${e?.message || e}` };
   } finally {
-    clearTimeout(t);
+    clearTimeout(timer);
   }
+
+  const tipo = res.headers.get('content-type') || '';
+  let json = null;
+  if (tipo.includes('application/json')) {
+    try {
+      json = await res.json();
+    } catch {
+      // JSON corrupto: se reporta abajo como respuesta no válida.
+    }
+  }
+  if (!json) {
+    // Ej.: index.html del servidor de Vite en local (sin `netlify dev`), o una
+    // página de error del hosting.
+    return { ok: false, motivo: `respuesta no JSON (HTTP ${res.status}, ${tipo || 'sin content-type'})` };
+  }
+  if (!res.ok || json.success === false) {
+    return { ok: false, motivo: `HTTP ${res.status}: ${json.error || 'sin detalle'}` };
+  }
+  const valor = Number(json.data?.tipoCambio);
+  if (!Number.isFinite(valor) || valor <= 0) {
+    return { ok: false, motivo: `valor inválido (${json.data?.tipoCambio})` };
+  }
+  // La fecha llega en ISO (yyyy-MM-dd) desde el SDDE; aFecha la ancla local.
+  const fecha = aFecha(json.data?.fecha);
+  if (!fecha) return { ok: false, motivo: `fecha inválida (${json.data?.fecha})` };
+  return { ok: true, valor, fecha };
 }
 
 /**
- * Lee (y cachea) la configuración general (config/general).
+ * Lee (y cachea) `config/general` SIN consultar el tipo de cambio en vivo.
+ * Para usos que no cotizan: p. ej. el PDF del detalle, que imprime el tipo de
+ * cambio GUARDADO en la cotización y solo necesita los datos de la empresa.
  *
- * Tipo de cambio (NO editable en la UI): se usa `tipoCambio` si existe (valor
- * resuelto/BCCR); si no, cae en `tipoCambioManual`. También se expone la fuente
- * (`tipoCambioFuente`: "BCCR"/"manual") y la fecha si están, para mostrarlas
- * como texto de solo lectura (espejo de loadInitialData del legacy).
- * @returns {Promise<object>} con tipoCambio, tipoCambioFuente, tipoCambioFecha,
- *   tipoCambioManual, iva, nombreEmpresa, etc.
+ * Tipo de cambio de config: `tipoCambio` (último valor BCCR guardado por
+ * tools/actualizarTipoCambio.js) si existe; si no, `tipoCambioManual`.
+ * `tipoCambioOrigen`: 'config' | 'manual'.
  */
-export async function getConfig() {
-  if (cacheConfig) return cacheConfig;
-  if (promesaConfig) return promesaConfig;
+export async function getConfigBase() {
+  if (cacheConfigBase) return cacheConfigBase;
+  if (promesaConfigBase) return promesaConfigBase;
 
-  promesaConfig = (async () => {
+  promesaConfigBase = (async () => {
     const snap = await getDoc(doc(db, 'config', 'general'));
     const data = snap.exists() ? snap.data() : {};
     const manual = Number(data.tipoCambioManual) || 512;
-    // Efectivo: BCCR (`tipoCambio`) si viene; si no, el manual.
-    let efectivo = Number(data.tipoCambio) > 0 ? Number(data.tipoCambio) : manual;
-    // Fuente: la declarada; si hay `tipoCambio` explícito y no hay fuente, es BCCR.
-    let fuente = data.tipoCambioFuente || (Number(data.tipoCambio) > 0 ? 'BCCR' : 'manual');
-    let fecha = aFecha(data.tipoCambioFecha);
-
-    // Si hay endpoint del BCCR (Apps Script de la empresa), traer el valor en
-    // vivo y usarlo consistentemente (precios + total USD). Fallback: lo de config.
-    if (data.tipoCambioEndpoint) {
-      try {
-        const vivo = await fetchTipoCambioEndpoint(data.tipoCambioEndpoint);
-        if (vivo) {
-          efectivo = vivo.valor;
-          fuente = 'BCCR';
-          fecha = vivo.fecha;
-        }
-      } catch (e) {
-        console.warn('Tipo de cambio en vivo no disponible; se usa el de config:', e);
-      }
-    }
+    const guardado = Number(data.tipoCambio) > 0 ? Number(data.tipoCambio) : 0;
 
     // Defaults defensivos (mismos valores que el legacy) por si falta alguna clave.
-    cacheConfig = {
-      tipoCambio: efectivo,
-      tipoCambioFuente: fuente,
-      tipoCambioFecha: fecha,
+    cacheConfigBase = {
+      tipoCambio: guardado || manual,
+      // Fuente: la declarada; si hay `tipoCambio` explícito y no hay fuente, es BCCR.
+      tipoCambioFuente: data.tipoCambioFuente || (guardado ? 'BCCR' : 'manual'),
+      tipoCambioFecha: aFecha(data.tipoCambioFecha),
+      tipoCambioOrigen: guardado ? 'config' : 'manual',
       tipoCambioManual: manual,
       iva: typeof data.iva === 'number' ? data.iva : 0.13,
       nombreEmpresa: data.nombreEmpresa || 'Empaques Belén',
@@ -521,7 +539,48 @@ export async function getConfig() {
       direccion: data.direccion || 'San Rafael, Alajuela, Costa Rica',
       cedulaJuridica: data.cedulaJuridica || '3-101-135332',
     };
-    return cacheConfig;
+    return cacheConfigBase;
+  })();
+
+  try {
+    return await promesaConfigBase;
+  } finally {
+    promesaConfigBase = null;
+  }
+}
+
+/**
+ * Configuración para COTIZAR: `config/general` + tipo de cambio del BCCR en
+ * vivo (NO editable en la UI), usado consistentemente en precios y total USD.
+ *
+ * Si la consulta en vivo falla se usa el de config (`getConfigBase`), se
+ * registra el motivo en consola y se expone en `tipoCambioErrorVivo`. Ese
+ * resultado NO se cachea: la próxima llamada (o `reintentarTipoCambio`) vuelve
+ * a consultar. Un valor en vivo correcto sí queda cacheado por sesión.
+ * `tipoCambioOrigen`: 'vivo' | 'config' | 'manual'.
+ */
+export async function getConfig() {
+  if (cacheConfig) return cacheConfig;
+  if (promesaConfig) return promesaConfig;
+
+  promesaConfig = (async () => {
+    const [base, vivo] = await Promise.all([getConfigBase(), fetchTipoCambioEnVivo()]);
+    if (vivo.ok) {
+      cacheConfig = {
+        ...base,
+        tipoCambio: vivo.valor,
+        tipoCambioFuente: 'BCCR',
+        tipoCambioFecha: vivo.fecha,
+        tipoCambioOrigen: 'vivo',
+      };
+      return cacheConfig;
+    }
+    const fecha = base.tipoCambioFecha ? base.tipoCambioFecha.toLocaleDateString('es-CR') : 'sin fecha';
+    console.warn(
+      `Tipo de cambio en vivo no disponible (${vivo.motivo}); se usa el de config: ` +
+        `${base.tipoCambio} (${base.tipoCambioOrigen}, ${fecha}).`,
+    );
+    return { ...base, tipoCambioErrorVivo: vivo.motivo };
   })();
 
   try {
@@ -529,6 +588,13 @@ export async function getConfig() {
   } finally {
     promesaConfig = null;
   }
+}
+
+/** Descarta lo cacheado y vuelve a consultar el tipo de cambio (botón "Reintentar"). */
+export function reintentarTipoCambio() {
+  cacheConfigBase = null;
+  cacheConfig = null;
+  return getConfig();
 }
 
 /** Carga (y cachea) todas las condiciones. */

@@ -1170,6 +1170,30 @@ svg { flex-shrink: 0; }
   color: #9a5a12;
 }
 .tc-alerta svg { width: 15px; height: 15px; flex-shrink: 0; }
+.tc-lectura .tc-reintentar { align-self: flex-start; }
+/* Confirmación explícita para cotizar con un tipo de cambio viejo o manual */
+.tc-confirmacion {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-2);
+  padding: 10px 12px;
+  border: 1px solid #e0a13a;
+  border-radius: var(--radio-sm);
+  background: #fdf4e7;
+  color: #9a5a12;
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.tc-confirmacion input {
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--indigo-500);
+  cursor: pointer;
+}
 
 /* ---- Buscador de combinaciones + carrito ---- */
 .buscador-layout {

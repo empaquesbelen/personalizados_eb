@@ -25,6 +25,11 @@ flowchart TB
         Rules["Security Rules<br/>(permisos por rol + estados)"]
     end
 
+    subgraph NetlifyFn["Netlify Functions (mismo sitio)"]
+        FnTC["tipo-cambio<br/>/.netlify/functions/tipo-cambio<br/>(token en env BCCR_TOKEN, caché CDN 10 min)"]
+    end
+
+    BCCR["API SDDE del BCCR<br/>(indicador 318, venta)"]
     Ext["Outlook (correos manuales,<br/>FUERA del sistema)"]
 
     Auth --> FAuth
@@ -33,6 +38,8 @@ flowchart TB
     MBack --> MCotiz
     MPrev & MBack & MAdmin & MDis & MSuper <--> FS
     FS --- Rules
+    MCotiz -- tipo de cambio en vivo --> FnTC
+    FnTC -- Bearer token --> BCCR
     MDis -.correo manual.-> Ext
 ```
 
@@ -91,3 +98,4 @@ Detalle y matriz de permisos: [ARQUITECTURA.md](ARQUITECTURA.md).
 | Código del sistema nuevo | `app/` *(desde Fase 1)* |
 | Reglas de seguridad | `app/firestore.rules` *(desde Fase 2)* |
 | Datos a importar | Google Sheets de la empresa + `legacy-cotizador/` |
+| Tipo de cambio BCCR (proxy servidor) | `app/netlify/functions/tipo-cambio.mjs` · cliente: `app/src/services/catalogo.js` (`getConfig`) · antigüedad/confirmación: `app/src/services/tipoCambio.js` |
